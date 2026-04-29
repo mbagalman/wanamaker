@@ -10,7 +10,9 @@ Every model fit produces a versioned artifact under the project-local
             ├── config.yaml          # snapshot of the run config
             ├── data_hash.txt        # sha256 of the input CSV
             ├── posterior.nc         # posterior draws (engine-native format)
-            ├── summary.json         # marginal summaries used for refresh diffs
+            ├── summary.json         # PosteriorSummary (used by refresh diffs and reports)
+            ├── trust_card.json      # computed TrustCard (persisted for auditability)
+            ├── refresh_diff.json    # RefreshDiff vs. prior run (present only on refresh)
             ├── timestamp.txt        # ISO-8601 UTC fit timestamp
             └── engine.txt           # name + version of the Bayesian engine
 
@@ -67,6 +69,14 @@ class RunPaths:
     @property
     def timestamp(self) -> Path:
         return self.root / "timestamp.txt"
+
+    @property
+    def trust_card(self) -> Path:
+        return self.root / "trust_card.json"
+
+    @property
+    def refresh_diff(self) -> Path:
+        return self.root / "refresh_diff.json"
 
     @property
     def engine(self) -> Path:

@@ -10,7 +10,14 @@ The raw engine object is still accessible for expert users via
 engine boundary.
 
 All summary types are frozen dataclasses so they can be safely cached,
-compared, and serialised to the run manifest without mutation risk.
+compared, and serialised to ``summary.json`` in the run artifact.
+
+**Credible interval mass:** All HDI bounds in this module use
+``interval_mass = 0.95`` (95%) by default, matching the BRD/PRD acceptance
+criteria (FR-3.1) and user-facing wording. Engine backends must compute
+intervals at the mass specified in each summary object, not the ArviZ
+default of 0.94. Pass ``interval_mass=0.95`` explicitly when calling
+``az.hdi`` or the equivalent in the chosen backend.
 """
 
 from __future__ import annotations
@@ -32,9 +39,11 @@ class ParameterSummary:
     mean: float
     sd: float
     hdi_low: float
-    """Lower bound of the 94% highest-density interval (ArviZ default)."""
+    """Lower bound of the highest-density interval."""
     hdi_high: float
-    """Upper bound of the 94% highest-density interval."""
+    """Upper bound of the highest-density interval."""
+    interval_mass: float = 0.95
+    """Probability mass of the HDI. Must be 0.95 for all v1 outputs (FR-3.1)."""
     r_hat: float | None = None
     """Gelman-Rubin convergence statistic. None if only one chain was run."""
     ess_bulk: float | None = None
@@ -54,12 +63,24 @@ class ChannelContributionSummary:
     """Expected contribution in target units (e.g. revenue)."""
     hdi_low: float
     hdi_high: float
-    share_of_effect: float
+    interval_mass: float = 0.95
+    """Probability mass of the HDI. Must be 0.95 for all v1 outputs (FR-3.1)."""
+    share_of_effect: float = 0.0
     """Mean contribution as a fraction of total media contribution."""
-    roi_mean: float
+    roi_mean: float = 0.0
     """Expected return per unit of spend."""
-    roi_hdi_low: float
-    roi_hdi_high: float
+    roi_hdi_low: float = 0.0
+    roi_hdi_high: float = 0.0
+    observed_spend_min: float = 0.0
+    """Minimum observed spend per period during the model training window."""
+    observed_spend_max: float = 0.0
+    """Maximum observed spend per period during the model training window.
+
+    Used by forecast and scenario comparison to flag extrapolation: any
+    plan that exceeds ``observed_spend_max`` for this channel is outside
+    the range the model has observed and must be visually distinguished
+    (FR-5.1) and warned about (FR-5.2).
+    """
     spend_invariant: bool = False
     """True when saturation could not be estimated from data (FR-3.2)."""
 
@@ -77,6 +98,8 @@ class PredictiveSummary:
     mean: list[float]
     hdi_low: list[float]
     hdi_high: list[float]
+    interval_mass: float = 0.95
+    """Probability mass of the HDI. Must be 0.95 for all v1 outputs (FR-3.1)."""
 
 
 @dataclass(frozen=True)
