@@ -108,6 +108,8 @@ def geometric_adstock(spend: NDArray[np.float64], decay: float) -> NDArray[np.fl
             "Use half_life_to_decay() to convert from half-life space."
         )
     spend = np.asarray(spend, dtype=np.float64)
+    if spend.ndim != 1:
+        raise ValueError(f"spend must be a 1-D array; got shape {spend.shape}")
     out = np.empty_like(spend)
     prev = 0.0
     for t in range(len(spend)):

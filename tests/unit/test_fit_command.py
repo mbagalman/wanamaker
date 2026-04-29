@@ -301,43 +301,45 @@ class TestSerializeSummary:
         summary = self._minimal_summary()
         s = serialize_summary(summary)
         parsed = json.loads(s)
-        assert "parameters" in parsed
-        assert "channel_contributions" in parsed
+        # Envelope wraps the payload
+        assert "schema_version" in parsed
+        assert "parameters" in parsed["payload"]
+        assert "channel_contributions" in parsed["payload"]
 
     def test_parameters_serialized(self) -> None:
         summary = self._minimal_summary()
-        parsed = json.loads(serialize_summary(summary))
-        assert parsed["parameters"][0]["name"] == "channel.search.half_life"
-        assert parsed["parameters"][0]["mean"] == pytest.approx(1.2)
+        payload = json.loads(serialize_summary(summary))["payload"]
+        assert payload["parameters"][0]["name"] == "channel.search.half_life"
+        assert payload["parameters"][0]["mean"] == pytest.approx(1.2)
 
     def test_channel_contributions_serialized(self) -> None:
         summary = self._minimal_summary()
-        parsed = json.loads(serialize_summary(summary))
-        assert parsed["channel_contributions"][0]["channel"] == "search"
+        payload = json.loads(serialize_summary(summary))["payload"]
+        assert payload["channel_contributions"][0]["channel"] == "search"
 
     def test_convergence_serialized(self) -> None:
         summary = self._minimal_summary()
-        parsed = json.loads(serialize_summary(summary))
-        assert parsed["convergence"]["n_divergences"] == 0
-        assert parsed["convergence"]["n_chains"] == 4
+        payload = json.loads(serialize_summary(summary))["payload"]
+        assert payload["convergence"]["n_divergences"] == 0
+        assert payload["convergence"]["n_chains"] == 4
 
     def test_none_predictive_serialized_as_null(self) -> None:
         summary = self._minimal_summary()
         assert summary.in_sample_predictive is None
-        parsed = json.loads(serialize_summary(summary))
-        assert parsed["in_sample_predictive"] is None
+        payload = json.loads(serialize_summary(summary))["payload"]
+        assert payload["in_sample_predictive"] is None
 
     def test_round_trip_preserves_interval_mass(self) -> None:
         summary = self._minimal_summary()
-        parsed = json.loads(serialize_summary(summary))
-        assert parsed["parameters"][0]["interval_mass"] == pytest.approx(0.95)
+        payload = json.loads(serialize_summary(summary))["payload"]
+        assert payload["parameters"][0]["interval_mass"] == pytest.approx(0.95)
 
     def test_empty_summary_serialized(self) -> None:
         summary = PosteriorSummary()
-        parsed = json.loads(serialize_summary(summary))
-        assert parsed["parameters"] == []
-        assert parsed["channel_contributions"] == []
-        assert parsed["convergence"] is None
+        payload = json.loads(serialize_summary(summary))["payload"]
+        assert payload["parameters"] == []
+        assert payload["channel_contributions"] == []
+        assert payload["convergence"] is None
 
 
 # ---------------------------------------------------------------------------

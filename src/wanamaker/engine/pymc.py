@@ -49,6 +49,10 @@ class PyMCRawPosterior:
     model_spec: Any
     date_column: str | None
     target_column: str
+    period_labels: list[str] | None = None
+    """ISO-8601 date strings for each fitted period, extracted from the input
+    data at fit time.  Used by ``posterior_predictive`` to populate
+    ``PredictiveSummary.periods`` with real dates rather than integer indices."""
 
 
 RUNTIME_SETTINGS: dict[str, RuntimeSettings] = {
@@ -88,6 +92,11 @@ class PyMCEngine:
         settings = runtime_settings(runtime_mode)
         target_column = _target_column(model_spec, data)
         date_column = getattr(model_spec, "date_column", None) or None
+        period_labels: list[str] | None = (
+            data[date_column].astype(str).tolist()
+            if date_column and date_column in data.columns
+            else None
+        )
         _validate_columns(model_spec, data, target_column)
 
         pm, _, _ = _require_pymc_stack()
@@ -107,6 +116,7 @@ class PyMCEngine:
             model_spec=model_spec,
             date_column=date_column,
             target_column=target_column,
+            period_labels=period_labels,
         )
         summary = summarize_inference_data(idata, model_spec, data, target_column, date_column)
         diagnostics = {
@@ -140,7 +150,7 @@ class PyMCEngine:
                 "predictive draws are supported."
             )
 
-        pm, _, _ = _require_pymc_stack()
+        pm, az, _ = _require_pymc_stack()
         with raw.model:
             ppc = pm.sample_posterior_predictive(
                 raw.idata,
@@ -151,8 +161,9 @@ class PyMCEngine:
         target_values = ppc.posterior_predictive["target"]
         target = target_values.values.reshape(-1, target_values.shape[-1])
         mean = target.mean(axis=0)
-        hdi = _hdi_2d(target)
-        periods = _period_labels_from_idata(raw.idata, raw.date_column, target.shape[1])
+        hdi = _hdi_2d(target, az)
+        n_periods = target.shape[1]
+        periods = raw.period_labels if raw.period_labels else [str(i) for i in range(n_periods)]
         return PredictiveSummary(
             periods=periods,
             mean=mean.tolist(),
@@ -175,8 +186,24 @@ class PyMCEngine:
         channels = list(getattr(model_spec, "channels", []))
         control_columns = list(getattr(model_spec, "control_columns", []))
 
+        # Data-adaptive scale for priors whose natural magnitude is proportional
+        # to the target.  Using 2 × std for the intercept gives a weakly
+        # informative prior that covers plausible baseline values without
+        # constraining the model.  The same scale is used for the channel
+        # coefficient so that a unit saturated-spend signal can produce a
+        # full-range contribution.
+        target_std = (
+            float(data[target_column].std())
+            or float(abs(data[target_column].mean()))
+            or 1.0
+        )
+
         with pm.Model(coords=coords) as model:
-            intercept = pm.Normal("intercept", mu=float(data[target_column].mean()), sigma=10.0)
+            intercept = pm.Normal(
+                "intercept",
+                mu=float(data[target_column].mean()),
+                sigma=target_std * 2.0,
+            )
             mu = intercept
 
             for channel in channels:
@@ -203,7 +230,10 @@ class PyMCEngine:
                     sigma=priors.hill_alpha_sigma,
                 )
                 saturated = _hill_saturation_tensor(pt, adstocked, ec50, slope)
-                coefficient = pm.HalfNormal(f"channel__{channel.name}__coefficient", sigma=1.0)
+                coefficient = pm.HalfNormal(
+                    f"channel__{channel.name}__coefficient",
+                    sigma=target_std,
+                )
                 contribution = pm.Deterministic(
                     f"contribution__{channel.name}",
                     coefficient * saturated,
@@ -266,7 +296,7 @@ def summarize_inference_data(
         if values.ndim > 2:
             continue
         flat = values.reshape(-1)
-        hdi_low, hdi_high = _hdi_1d(flat)
+        hdi_low, hdi_high = _hdi_1d(flat, az)
         row = az_summary.loc[variable] if variable in az_summary.index else None
         parameters.append(
             ParameterSummary(
@@ -281,9 +311,9 @@ def summarize_inference_data(
             )
         )
 
-    channel_contributions = _channel_contribution_summaries(posterior, model_spec, data)
+    channel_contributions = _channel_contribution_summaries(posterior, model_spec, data, az)
     convergence = _convergence_summary(az_summary, idata)
-    predictive = _in_sample_predictive_summary(idata, date_column, len(data))
+    predictive = _in_sample_predictive_summary(idata, data, date_column, az)
     return PosteriorSummary(
         parameters=parameters,
         channel_contributions=channel_contributions,
@@ -358,6 +388,7 @@ def _channel_contribution_summaries(
     posterior: Any,
     model_spec: Any,
     data: pd.DataFrame,
+    az: Any,
 ) -> list[ChannelContributionSummary]:
     channels = list(getattr(model_spec, "channels", []))
     totals_by_channel: dict[str, NDArray[np.float64]] = {}
@@ -378,11 +409,11 @@ def _channel_contribution_summaries(
         totals = totals_by_channel.get(channel.name)
         if totals is None:
             continue
-        hdi_low, hdi_high = _hdi_1d(totals)
+        hdi_low, hdi_high = _hdi_1d(totals, az)
         spend = data[channel.name].to_numpy(dtype=np.float64)
         total_spend = float(np.sum(spend))
         roi_samples = totals / total_spend if total_spend > 0 else np.zeros_like(totals)
-        roi_hdi_low, roi_hdi_high = _hdi_1d(roi_samples)
+        roi_hdi_low, roi_hdi_high = _hdi_1d(roi_samples, az)
         mean_total = float(np.mean(totals))
         out.append(
             ChannelContributionSummary(
@@ -413,8 +444,8 @@ def _convergence_summary(az_summary: Any, idata: Any) -> ConvergenceSummary:
     n_chains = int(idata.posterior.sizes.get("chain", 0))
     n_draws = int(idata.posterior.sizes.get("draw", 0))
     return ConvergenceSummary(
-        max_r_hat=float(np.max(r_hat)) if len(r_hat) else float("nan"),
-        min_ess_bulk=float(np.min(ess_bulk)) if len(ess_bulk) else float("nan"),
+        max_r_hat=float(np.max(r_hat)) if len(r_hat) else None,
+        min_ess_bulk=float(np.min(ess_bulk)) if len(ess_bulk) else None,
         n_divergences=divergences,
         n_chains=n_chains,
         n_draws=n_draws,
@@ -423,17 +454,23 @@ def _convergence_summary(az_summary: Any, idata: Any) -> ConvergenceSummary:
 
 def _in_sample_predictive_summary(
     idata: Any,
+    data: pd.DataFrame,
     date_column: str | None,
-    n_periods: int,
+    az: Any,
 ) -> PredictiveSummary | None:
     posterior_predictive = getattr(idata, "posterior_predictive", None)
     if posterior_predictive is None or "target" not in posterior_predictive:
         return None
+    n_periods = len(data)
     target = np.asarray(posterior_predictive["target"].values).reshape(-1, n_periods)
     mean = target.mean(axis=0)
-    hdi = _hdi_2d(target)
+    hdi = _hdi_2d(target, az)
+    if date_column and date_column in data.columns:
+        periods = data[date_column].astype(str).tolist()
+    else:
+        periods = [str(i) for i in range(n_periods)]
     return PredictiveSummary(
-        periods=_period_labels_from_idata(idata, date_column, n_periods),
+        periods=periods,
         mean=mean.tolist(),
         hdi_low=hdi[:, 0].tolist(),
         hdi_high=hdi[:, 1].tolist(),
@@ -441,26 +478,36 @@ def _in_sample_predictive_summary(
     )
 
 
-def _period_labels_from_idata(idata: Any, date_column: str | None, n_periods: int) -> list[str]:
-    if date_column and date_column in getattr(idata, "constant_data", {}):
-        values = np.asarray(idata.constant_data[date_column].values)
-        return [str(value) for value in values]
-    return [str(index) for index in range(n_periods)]
+def _hdi_1d(values: NDArray[np.float64], az: Any) -> tuple[float, float]:
+    """Return the 95% highest-density interval for a 1-D sample array.
 
-
-def _hdi_1d(values: NDArray[np.float64]) -> tuple[float, float]:
+    Uses ArviZ's ``hdi`` function, which finds the shortest interval containing
+    ``INTERVAL_MASS`` of the posterior mass.  For skewed posteriors (log-normal
+    half-life, EC50, slope samples) this differs meaningfully from an equal-
+    tailed quantile interval.
+    """
     if values.size == 0:
         return 0.0, 0.0
-    alpha = (1.0 - INTERVAL_MASS) / 2.0
-    return (
-        float(np.quantile(values, alpha)),
-        float(np.quantile(values, 1.0 - alpha)),
-    )
+    result = az.hdi(values, hdi_prob=INTERVAL_MASS)
+    return float(result[0]), float(result[1])
 
 
-def _hdi_2d(values: NDArray[np.float64]) -> NDArray[np.float64]:
-    alpha = (1.0 - INTERVAL_MASS) / 2.0
-    return np.quantile(values, [alpha, 1.0 - alpha], axis=0).T
+def _hdi_2d(values: NDArray[np.float64], az: Any) -> NDArray[np.float64]:
+    """Return 95% HDI bounds for each column of a 2-D sample matrix.
+
+    Args:
+        values: Shape ``(n_samples, n_periods)``.
+        az: ArviZ module returned by ``_require_pymc_stack()``.
+
+    Returns:
+        Shape ``(n_periods, 2)`` array of ``[hdi_low, hdi_high]`` per period.
+    """
+    n_periods = values.shape[1]
+    out = np.empty((n_periods, 2), dtype=float)
+    for i in range(n_periods):
+        lo, hi = _hdi_1d(values[:, i], az)
+        out[i] = [lo, hi]
+    return out
 
 
 def _optional_summary_value(row: Any, column: str) -> float | None:

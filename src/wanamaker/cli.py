@@ -42,15 +42,168 @@ def diagnose(
         "-c",
         exists=True,
         help=(
-            "Optional YAML config. When provided, spend and control columns are "
-            "read from the config and all checks run. Without it, only checks that "
-            "do not require column knowledge (history length, date regularity, "
-            "structural breaks) are run, and a warning is emitted."
+            "Optional YAML config. When provided, column names and spend/control "
+            "columns are read from the config and all checks run."
+        ),
+    ),
+    date_column: str | None = typer.Option(
+        None,
+        "--date-column",
+        "-d",
+        help=(
+            "Name of the date column. Auto-detected when omitted and --config "
+            "is not provided."
+        ),
+    ),
+    target_column: str | None = typer.Option(
+        None,
+        "--target-column",
+        "-t",
+        help=(
+            "Name of the numeric target column (e.g. revenue). "
+            "Auto-detected when omitted and --config is not provided."
         ),
     ),
 ) -> None:
     """Run the pre-flight data readiness diagnostic (FR-2.1)."""
-    raise NotImplementedError("Phase 1: wire up diagnose command")
+    import pandas as pd
+
+    from wanamaker.diagnose.checks import (
+        check_date_regularity,
+        check_history_length,
+        check_missing_values,
+        check_structural_breaks,
+        check_target_stability,
+    )
+    from wanamaker.diagnose.readiness import CheckResult, CheckSeverity, ReadinessLevel
+
+    # ------------------------------------------------------------------
+    # 1. Load CSV (needed before column inference)
+    # ------------------------------------------------------------------
+    typer.echo(f"Loading data: {data}")
+    df = pd.read_csv(data)
+    typer.echo(f"  {len(df)} rows × {len(df.columns)} columns")
+
+    # ------------------------------------------------------------------
+    # 2. Resolve column names
+    # ------------------------------------------------------------------
+    if config is not None:
+        from wanamaker.config import load_config
+        cfg = load_config(config)
+        resolved_date_col = cfg.data.date_column
+        resolved_target_col = cfg.data.target_column
+    else:
+        resolved_date_col = date_column
+        resolved_target_col = target_column
+
+        if resolved_date_col is None or resolved_target_col is None:
+            inferred_date, inferred_target = _infer_columns(df)
+            if resolved_date_col is None:
+                resolved_date_col = inferred_date
+            if resolved_target_col is None:
+                resolved_target_col = inferred_target
+
+        if resolved_date_col is not None or resolved_target_col is not None:
+            # Show what was inferred so users can verify or override
+            if date_column is None and resolved_date_col is not None:
+                typer.echo(
+                    typer.style(
+                        f"  [INFO] Inferred date column: '{resolved_date_col}'. "
+                        "Use --date-column to override.",
+                        fg=typer.colors.CYAN,
+                    )
+                )
+            if target_column is None and resolved_target_col is not None:
+                typer.echo(
+                    typer.style(
+                        f"  [INFO] Inferred target column: '{resolved_target_col}'. "
+                        "Use --target-column to override.",
+                        fg=typer.colors.CYAN,
+                    )
+                )
+
+        if resolved_date_col is None and resolved_target_col is None:
+            typer.echo(
+                typer.style(
+                    f"Error: Could not infer date or target columns from "
+                    f"{list(df.columns)}. "
+                    "Use --date-column and --target-column to specify them.",
+                    fg=typer.colors.RED,
+                ),
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+    # ------------------------------------------------------------------
+    # 3. Run checks, tolerating NotImplementedError for unfinished ones
+    # ------------------------------------------------------------------
+    results: list[CheckResult] = []
+
+    def _try(fn, *args, **kwargs) -> None:  # type: ignore[type-arg]
+        try:
+            out = fn(*args, **kwargs)
+            if isinstance(out, list):
+                results.extend(out)
+            elif out is not None:
+                results.append(out)
+        except NotImplementedError:
+            pass
+        except (KeyError, ValueError) as exc:
+            results.append(
+                CheckResult(
+                    name=fn.__name__.removeprefix("check_"),
+                    severity=CheckSeverity.WARNING,
+                    message=f"Check skipped — {exc}",
+                )
+            )
+
+    _try(check_history_length, df, resolved_date_col)
+    _try(check_date_regularity, df, resolved_date_col)
+    _try(check_missing_values, df)
+    _try(check_target_stability, df, resolved_target_col)
+    _try(check_structural_breaks, df, resolved_target_col, resolved_date_col)
+
+    # ------------------------------------------------------------------
+    # 4. Determine readiness level
+    # ------------------------------------------------------------------
+    blockers = [r for r in results if r.severity == CheckSeverity.BLOCKER]
+    warnings = [r for r in results if r.severity == CheckSeverity.WARNING]
+
+    if blockers:
+        level = ReadinessLevel.NOT_RECOMMENDED
+    elif warnings:
+        level = ReadinessLevel.USABLE_WITH_WARNINGS
+    else:
+        level = ReadinessLevel.READY
+
+    # ------------------------------------------------------------------
+    # 5. Print report
+    # ------------------------------------------------------------------
+    for r in results:
+        if r.severity == CheckSeverity.BLOCKER:
+            colour = typer.colors.RED
+            label = "BLOCKER"
+        elif r.severity == CheckSeverity.WARNING:
+            colour = typer.colors.YELLOW
+            label = "WARNING"
+        else:
+            colour = typer.colors.GREEN
+            label = "INFO"
+        typer.echo(typer.style(f"  [{label}] {r.message}", fg=colour))
+
+    if not results:
+        typer.echo(typer.style("  No issues found.", fg=typer.colors.GREEN))
+
+    level_colour = typer.colors.GREEN if level == ReadinessLevel.READY else (
+        typer.colors.YELLOW if level == ReadinessLevel.USABLE_WITH_WARNINGS else typer.colors.RED
+    )
+    typer.echo(typer.style(f"\nReadiness: {level.value}", fg=level_colour, bold=True))
+
+    # ------------------------------------------------------------------
+    # 6. Exit code: non-zero when not recommended or diagnostic-only
+    # ------------------------------------------------------------------
+    if level in (ReadinessLevel.NOT_RECOMMENDED, ReadinessLevel.DIAGNOSTIC_ONLY):
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -245,6 +398,64 @@ def refresh(
 # ---------------------------------------------------------------------------
 # Private helpers (not part of the public CLI surface)
 # ---------------------------------------------------------------------------
+
+
+def _infer_columns(df: object) -> tuple[str | None, str | None]:
+    """Heuristically infer date and target columns from a DataFrame.
+
+    Resolution order for **date column**:
+    1. Any column whose lowercase name contains "date", "week", "day", "month",
+       "period", "timestamp", or "time".
+    2. The first non-numeric column whose first five non-null values all parse
+       as datetimes via ``pd.to_datetime``.
+
+    Resolution order for **target column**:
+    1. Any numeric column whose lowercase name contains "revenue", "sales",
+       "target", "kpi", or "metric".
+    2. The first numeric column that is not the inferred date column.
+
+    Returns a ``(date_col, target_col)`` tuple; either element may be ``None``
+    when inference fails.
+    """
+    import pandas as pd
+
+    assert isinstance(df, pd.DataFrame)
+
+    _DATE_HINTS = ("date", "week", "day", "month", "period", "timestamp", "time")
+    _TARGET_HINTS = ("revenue", "sales", "target", "kpi", "metric")
+
+    # --- Date column ---
+    date_col: str | None = None
+    for col in df.columns:
+        if any(hint in col.lower() for hint in _DATE_HINTS):
+            date_col = col
+            break
+    if date_col is None:
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                continue
+            try:
+                pd.to_datetime(df[col].dropna().head(5))
+                date_col = col
+                break
+            except (ValueError, TypeError):
+                pass
+
+    # --- Target column ---
+    # Only infer from name hints; do not fall back to "first numeric column"
+    # so that columns with opaque names like "col_a" are not silently mis-labelled.
+    # Users with non-standard column names should use --target-column explicitly.
+    numeric_cols = [
+        c for c in df.columns
+        if pd.api.types.is_numeric_dtype(df[c]) and c != date_col
+    ]
+    target_col: str | None = None
+    for col in numeric_cols:
+        if any(hint in col.lower() for hint in _TARGET_HINTS):
+            target_col = col
+            break
+
+    return date_col, target_col
 
 
 def _run_diagnostics(data: object, cfg: object) -> str:

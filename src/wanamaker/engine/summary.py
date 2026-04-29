@@ -109,10 +109,12 @@ class ConvergenceSummary:
     Feeds the Trust Card ``convergence`` dimension (FR-5.4).
     """
 
-    max_r_hat: float
-    """Worst (highest) R-hat across all parameters. Target: < 1.01."""
-    min_ess_bulk: float
-    """Worst (lowest) bulk ESS across all parameters. Target: > 400."""
+    max_r_hat: float | None
+    """Worst (highest) R-hat across all parameters. Target: < 1.01.
+    ``None`` when R-hat is not computable (e.g. single-chain run)."""
+    min_ess_bulk: float | None
+    """Worst (lowest) bulk ESS across all parameters. Target: > 400.
+    ``None`` when ESS is not computable (e.g. single-chain run)."""
     n_divergences: int
     """Number of divergent transitions (NUTS). Target: 0."""
     n_chains: int

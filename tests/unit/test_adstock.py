@@ -61,6 +61,11 @@ class TestHalfLifeToDecay:
 
 
 class TestGeometricAdstockValidation:
+    def test_2d_input_rejected(self) -> None:
+        """2-D arrays must raise ValueError, matching weibull_adstock behaviour."""
+        with pytest.raises(ValueError, match="1-D array"):
+            geometric_adstock(np.ones((3, 4)), decay=0.5)
+
     def test_decay_zero_is_valid(self) -> None:
         # decay=0 is the boundary case (no carryover); must not raise.
         result = geometric_adstock(np.array([1.0, 2.0]), decay=0.0)
