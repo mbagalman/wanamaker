@@ -525,8 +525,8 @@ All outputs go to `.wanamaker/` in the project directory (FR-Privacy.2). Nothing
 | `engine/summary.py` | **Implemented** -- all typed summary types | Done |
 | `transforms/adstock.py` | Scaffolded -- both functions stubbed | Phase 0 |
 | `transforms/saturation.py` | Scaffolded -- Hill function stubbed | Phase 0 |
-| `model/spec.py` | **Partial** -- `ChannelSpec`, `ModelSpec` exist; planned fields TBD | Phase 0 |
-| `model/priors.py` | Stubbed | Phase 0 |
+| `model/spec.py` | **Implemented** -- full schema: `ChannelSpec`, `LiftPrior`, `HoldoutConfig`, `SeasonalitySpec`, `AnchoredPrior`, `ModelSpec` | Done |
+| `model/priors.py` | **Implemented** -- `ChannelPriors`, `default_priors_for_category` for all 10 categories | Done |
 | `refresh/anchor.py` | **Implemented** -- presets, `resolve_anchor_weight` | Done |
 | `refresh/classify.py` | **Implemented** -- `MovementClass` enum | Done |
 | `refresh/diff.py` | Scaffolded -- data structures defined; `compute_diff` stubbed | Phase 1 |

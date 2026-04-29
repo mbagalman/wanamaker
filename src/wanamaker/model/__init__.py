@@ -8,6 +8,20 @@ additive linear combination of transformed media plus controls,
 weakly-informative priors on all coefficients.
 """
 
-from wanamaker.model.spec import ModelSpec
+from wanamaker.model.spec import (
+    AnchoredPrior,
+    ChannelSpec,
+    HoldoutConfig,
+    LiftPrior,
+    ModelSpec,
+    SeasonalitySpec,
+)
 
-__all__ = ["ModelSpec"]
+__all__ = [
+    "AnchoredPrior",
+    "ChannelSpec",
+    "HoldoutConfig",
+    "LiftPrior",
+    "ModelSpec",
+    "SeasonalitySpec",
+]

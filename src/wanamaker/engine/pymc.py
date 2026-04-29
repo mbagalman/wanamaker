@@ -87,7 +87,7 @@ class PyMCEngine:
         """
         settings = runtime_settings(runtime_mode)
         target_column = _target_column(model_spec, data)
-        date_column = getattr(model_spec, "date_column", None)
+        date_column = getattr(model_spec, "date_column", None) or None
         _validate_columns(model_spec, data, target_column)
 
         pm, _, _ = _require_pymc_stack()
@@ -307,12 +307,10 @@ def _require_pymc_stack() -> tuple[Any, Any, Any]:
 
 def _target_column(model_spec: Any, data: pd.DataFrame) -> str:
     target_column = getattr(model_spec, "target_column", None)
-    if target_column is None and "target" in data.columns:
-        return "target"
     if not target_column:
         raise ValueError(
-            "ModelSpec must define target_column before PyMC fitting. "
-            "Issue #7 finalizes this schema."
+            "ModelSpec.target_column is required. "
+            "Pass the name of the target metric column when constructing ModelSpec."
         )
     return str(target_column)
 

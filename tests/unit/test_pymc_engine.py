@@ -40,10 +40,23 @@ def test_runtime_settings_rejects_unknown_mode() -> None:
         runtime_settings("demo")
 
 
-def test_fit_requires_target_column_before_importing_pymc() -> None:
+def test_modelspec_requires_target_column() -> None:
+    """ModelSpec now requires target_column at construction time."""
+    with pytest.raises(TypeError):
+        ModelSpec(  # type: ignore[call-arg]
+            channels=[ChannelSpec(name="paid_search", category="paid_search")],
+            date_column="week",
+        )
+
+
+def test_fit_validates_target_column_before_importing_pymc() -> None:
+    """Even a SimpleNamespace with no target_column raises before PyMC import."""
     engine = PyMCEngine()
-    model_spec = ModelSpec(
+    model_spec = SimpleNamespace(
+        target_column="",
+        date_column="week",
         channels=[ChannelSpec(name="paid_search", category="paid_search")],
+        control_columns=[],
     )
     data = pd.DataFrame({"paid_search": [1.0, 2.0, 3.0], "revenue": [2.0, 4.0, 6.0]})
 
