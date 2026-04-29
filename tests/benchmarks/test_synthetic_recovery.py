@@ -34,9 +34,32 @@ def test_synthetic_recovery():
 
         # Test full fit using quick mode just to check API surface
         # For true benchmark, this should be standard mode and run multiple times
-        # But this would timeout in regular testing.
-        # Skipping execution of PyMC fitting because it takes >7mins
-        pytest.skip("Skipping PyMC fit due to long execution time. Test stub implemented.")
+        fit_result = engine.fit(model_spec, df, seed=42, runtime_mode="quick")
+
+        summary = fit_result.summary
+
+        # Extract total contribution
+        expected_total_contribution = sum([c['total_contribution'] for c in gt['channels'].values()])
+
+        # Calculate recovered total media contribution
+        recovered_total = sum([c.mean_contribution for c in summary.channel_contributions])
+
+        # Verify total media contribution is within 15%
+        error = abs(recovered_total - expected_total_contribution) / expected_total_contribution
+        assert error <= 0.15, f"Total media contribution error is {error:.2%}, expected <= 15%"
+
+        # Verify top 3 channels are ranked correctly
+        expected_channels_ranked = sorted(gt['channels'].items(), key=lambda x: x[1]['total_contribution'], reverse=True)
+        expected_top_3 = [x[0] for x in expected_channels_ranked[:3]]
+
+        recovered_channels_ranked = sorted(summary.channel_contributions, key=lambda x: x.mean_contribution, reverse=True)
+        recovered_top_3 = [x.channel for x in recovered_channels_ranked[:3]]
+
+        assert len(set(expected_top_3).intersection(set(recovered_top_3))) >= 2, "Top 3 channels not ranked correctly"
+
+        # CI coverage check left for future full simulation wrapper
+
+
 
     except (NotImplementedError, ImportError, ValueError) as e:
         pytest.skip(f"Engine backend not fully available: {e}")

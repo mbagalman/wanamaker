@@ -19,7 +19,7 @@ from wanamaker.transforms.saturation import hill_saturation
 
 def generate_synthetic_data(seed: int = 42) -> tuple[pd.DataFrame, dict]:
     """Generate 150 weeks of synthetic MMM data for ~12 channels."""
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     n_weeks = 150
     dates = pd.date_range(start="2020-01-01", periods=n_weeks, freq="W")
@@ -42,14 +42,14 @@ def generate_synthetic_data(seed: int = 42) -> tuple[pd.DataFrame, dict]:
 
     # Ground truth parameters
     # ROI ranges from 0.5 to 3.0
-    true_rois = np.random.uniform(0.5, 3.0, size=n_channels)
+    true_rois = rng.uniform(0.5, 3.0, size=n_channels)
     # Adstock decay ranges from 0.1 to 0.8
-    true_decays = np.random.uniform(0.1, 0.8, size=n_channels)
+    true_decays = rng.uniform(0.1, 0.8, size=n_channels)
     # Hill saturation parameters
     # EC50 ranges from 0.1 to 0.9 of max observed spend
-    true_ec50_fractions = np.random.uniform(0.1, 0.9, size=n_channels)
+    true_ec50_fractions = rng.uniform(0.1, 0.9, size=n_channels)
     # Slope ranges from 1.0 to 3.0
-    true_slopes = np.random.uniform(1.0, 3.0, size=n_channels)
+    true_slopes = rng.uniform(1.0, 3.0, size=n_channels)
 
     data = {"date": dates}
     ground_truth = {"channels": {}}
@@ -58,7 +58,7 @@ def generate_synthetic_data(seed: int = 42) -> tuple[pd.DataFrame, dict]:
 
     for i, channel in enumerate(channels):
         # Generate base spend
-        base_spend = np.random.lognormal(mean=10, sigma=1, size=n_weeks)
+        base_spend = rng.lognormal(mean=10, sigma=1, size=n_weeks)
         # Add some seasonality/trend
         trend = np.linspace(0.8, 1.2, n_weeks)
         seasonality = 1 + 0.2 * np.sin(np.linspace(0, 4 * np.pi, n_weeks))
@@ -94,8 +94,8 @@ def generate_synthetic_data(seed: int = 42) -> tuple[pd.DataFrame, dict]:
         }
 
     # Add control variables (e.g., price, competitor spend)
-    price = np.random.normal(100, 5, size=n_weeks)
-    comp_spend = np.random.lognormal(mean=12, sigma=0.5, size=n_weeks)
+    price = rng.normal(100, 5, size=n_weeks)
+    comp_spend = rng.lognormal(mean=12, sigma=0.5, size=n_weeks)
 
     data["price"] = price
     data["comp_spend"] = comp_spend
@@ -106,7 +106,7 @@ def generate_synthetic_data(seed: int = 42) -> tuple[pd.DataFrame, dict]:
     comp_effect = -0.1 * comp_spend
 
     # Total target (e.g., sales)
-    noise = np.random.normal(0, 500, size=n_weeks)
+    noise = rng.normal(0, 500, size=n_weeks)
     target = baseline + price_effect + comp_effect + total_media_contribution + noise
 
     # Ensure target is strictly positive
@@ -119,7 +119,24 @@ def generate_synthetic_data(seed: int = 42) -> tuple[pd.DataFrame, dict]:
     ground_truth["baseline"] = [float(x) for x in baseline]
     ground_truth["noise"] = [float(x) for x in noise]
 
+
+    ground_truth["seed"] = seed
+    ground_truth["n_weeks"] = n_weeks
+    ground_truth["date_column"] = "date"
+    ground_truth["target_column"] = "target"
+    ground_truth["spend_columns"] = [f"{c}_spend" for c in channels]
+    ground_truth["control_columns"] = ["price", "comp_spend"]
+
+    # Sort channels to get top-channel ordering based on true ROI (or total_contribution)
+    channels_by_contrib = sorted(
+        ground_truth["channels"].items(),
+        key=lambda x: x[1]["total_contribution"],
+        reverse=True
+    )
+    ground_truth["top_channels"] = [k for k, v in channels_by_contrib]
+
     return df, ground_truth
+
 
 
 if __name__ == "__main__":
