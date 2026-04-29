@@ -8,6 +8,7 @@ underlying contributions).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -21,4 +22,17 @@ def load_public_example() -> pd.DataFrame:
 
 def load_synthetic_ground_truth() -> tuple[pd.DataFrame, dict]:
     """Return (data, ground_truth_contributions)."""
-    raise NotImplementedError("Phase 0: synthetic ground-truth benchmark")
+    csv_path = BENCHMARK_DIR / "synthetic_ground_truth.csv"
+    json_path = BENCHMARK_DIR / "synthetic_ground_truth.json"
+
+    if not csv_path.exists() or not json_path.exists():
+        raise FileNotFoundError(
+            "Synthetic ground truth files not found. "
+            "Run benchmark_data/generate_synthetic_ground_truth.py first."
+        )
+
+    df = pd.read_csv(csv_path)
+    with open(json_path) as f:
+        ground_truth = json.load(f)
+
+    return df, ground_truth
