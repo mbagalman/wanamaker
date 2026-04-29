@@ -1,0 +1,37 @@
+site_name: Wanamaker
+site_description: Open-source Bayesian marketing mix modeling for trustable usability.
+site_url: https://wanamaker.dev
+repo_url: https://github.com/mbagalman/wanamaker
+repo_name: mbagalman/wanamaker
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Analyst's Guide: analyst_guide.md
+  - What Wanamaker Tells Your CMO: cmo_guide.md
+  - Privacy and Data Handling: privacy.md
+  - Comparison to Other Tools: comparison.md
+  - API Reference: api_reference.md
+  - Architecture:
+      - Technical Architecture: architecture.md
+      - BRD/PRD: wanamaker_brd_prd.md
+      - Feedback: feedback.md
+  - Decisions:
+      - Bayesian Engine Selection: decisions/0001-bayesian-engine-selection.md
+  - References:
+      - Adstock and Saturation: references/adstock_and_saturation.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
