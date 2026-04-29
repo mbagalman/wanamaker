@@ -1,106 +1,76 @@
-# Feedback on `architecture.md`
+# Feedback on `architecture.md` and GitHub Issues
 
-Overall: the architecture plan is sound and aligned with the BRD/PRD. The module boundaries support the project's main thesis: local-first execution, deterministic reporting, refresh accountability, and an engine-agnostic Bayesian core. I would proceed with this plan, but I would tighten the points below before Phase 0 implementation begins.
+Overall: the updated architecture is much stronger than the first draft. The main concerns from the prior review have been addressed: transforms are no longer treated as fixed preprocessing, `PosteriorSummary` is now the downstream contract, run identity is split into `run_fingerprint` and `run_id`, `--skip-validation` is explicitly handled, xgboost is no longer conflated with Bayesian quick mode, and the reference path now points to `docs/references/adstock_and_saturation.md`.
 
-## Substantive Criticism
+The GitHub Issues are also well-scoped and mostly line up with the architecture. I would proceed with the project. The criticism below is about tightening a few load-bearing details before implementation hardens.
 
-### 1. The transform data flow is conceptually ambiguous
+## Important Concerns
 
-The data-flow diagram shows `transforms/` applying geometric/Weibull adstock and Hill saturation before `engine.fit`. That is only correct if the transform parameters are fixed before fitting. The PRD, however, treats adstock and saturation parameters as inferred channel-level quantities, with posterior intervals and refresh anchoring.
+### 1. The benchmark and engine issues have a sequencing loop
 
-If decay, half-life, EC50, and slope are sampled parameters, the transforms must be part of the probabilistic program implemented by the engine backend, not a pre-engine preprocessing step. The pure NumPy transform functions are still useful for tests, documentation, benchmarks, fixed-parameter previews, and backend validation, but the architecture should say explicitly how backends consume the canonical transform definitions.
+Issue #1 says the engine selection spike benchmarks each candidate on the synthetic ground-truth dataset. Issue #8 uses the synthetic benchmark for backend acceptance. But issue #9, which creates the synthetic ground-truth benchmark, is marked as blocked by #8.
 
-Suggested fix: revise Section 4 so `model/` produces a parameterized `ModelSpec`, `transforms/` owns canonical formulas and test fixtures, and `engine/` applies those formulas inside the backend-specific model graph.
+That creates a practical loop: the engine cannot be selected or accepted without a benchmark, but the benchmark is said to wait for the engine.
 
-### 2. The engine abstraction is too narrow for downstream features
+Suggested fix: split #9 into two pieces:
 
-`Engine.fit(...) -> FitResult` and `Posterior(raw: Any)` are a good starting point for a spike, but too opaque for the planned architecture. Refresh diffs, trust cards, reports, scenario comparison, lift-test consistency, prior sensitivity, and benchmark acceptance tests all need stable access to the same posterior summaries.
+- create the synthetic data generator, committed CSV, and ground-truth JSON before #1/#8
+- verify model recovery on that dataset after #8
 
-Without an engine-neutral posterior summary contract, each downstream module will either reach into `Posterior.raw` or invent its own summary shape. That would weaken the engine boundary at the exact point the project needs it most.
+The generator should be engine-independent and should use the canonical NumPy transform functions once #3-#5 are done.
 
-Suggested fix: add a small typed summary layer before implementing a real backend. For example:
+### 2. Credible interval mass is inconsistent with the PRD
 
-- `PosteriorSummary`
-- `ParameterSummary`
-- `ChannelContributionSummary`
-- `PredictiveSummary`
-- helper functions owned by `engine/summary.py` or `model/summaries.py`
+The PRD and issue #8 use 95% credible interval coverage as an acceptance criterion. The current `engine/summary.py` docstrings describe `hdi_low` and `hdi_high` as 94% HDIs because that is the ArviZ default.
 
-The raw engine object can still be exposed for expert users, but core modules should depend on typed summaries.
+That mismatch will quietly leak into reports, Trust Card logic, benchmark tests, and user-facing wording.
 
-### 3. `ModelSpec` is under-specified relative to the architecture
+Suggested fix: make interval mass explicit in the summary contract. Either standardize on 95% intervals everywhere or add a field such as `interval_mass: float = 0.95` to `ParameterSummary`, `ChannelContributionSummary`, and `PredictiveSummary`. For this project, 95% is the safer default because it matches the locked PRD.
 
-The document describes `ModelSpec` as a pure data description of channels, transforms, and priors, but the current scaffold only contains channel names, categories, adstock family, and controls. That is fine for now, but the architecture should define the intended shape before the backend spike hardens around an accidental minimum.
+### 3. Forecast and scenario comparison need historical spend context
 
-The spec likely needs to represent:
+The architecture notes that extrapolation warnings require observed spend ranges, but issue #20 only has `forecast` accept a `Posterior` and a future spend plan. That is not enough information to flag spend outside the historical range unless the forecast function also receives fit metadata or the posterior summary contains spend ranges.
 
-- target column and date/frequency assumptions
-- channel prior references or resolved prior objects
-- lift-test calibration inputs
-- holdout configuration
-- seasonality/trend/control treatment
-- runtime mode interpretation
-- refresh anchoring priors
-- whether a channel is spend-invariant or weakly identified
+Suggested fix: add a small `SpendRange` or `FitContext` contract before implementing #20/#21. It should include observed min/max per channel and spend-invariant channel flags. Then update #20 and #21 so extrapolation warnings are not left as ad hoc logic.
 
-Suggested fix: include a planned `ModelSpec` schema in `architecture.md`, even if many fields remain unimplemented.
+### 4. Artifact serialization is under-specified
 
-### 4. Artifact identity and reproducibility need sharper separation
+Several issues assume typed objects are written to and loaded from artifacts:
 
-The architecture says run IDs are content-addressed from data hash, config, and timestamp, and are stable for the same `(data, config)` pair within the same minute. This mixes two concerns:
+- `summary.json` stores `PosteriorSummary`
+- `manifest.json` stores identity and validation state
+- `report` loads `TrustCard`
+- `refresh` persists a diff report
 
-- reproducible model outputs for the same data/config/seed
-- unique run records for repeated executions
+The architecture names these files, but there is no issue dedicated to JSON schema, serialization/deserialization, schema versioning, or backward compatibility. This will become painful once reports and refresh compare old runs.
 
-Including timestamps in run identity means identical runs across different minutes produce different run IDs. That may be acceptable for artifact bookkeeping, but it should not be described as content-addressed in the reproducibility sense.
+Suggested fix: add a dedicated issue for artifact schemas and serializers. It should cover `PosteriorSummary`, `TrustCard`, `RefreshDiff`, and `manifest.json`, including `summary_schema_version` and round-trip tests.
 
-Suggested fix: define both concepts:
+### 5. Reproducibility should be tested during engine selection, not only after
 
-- a deterministic `run_fingerprint` from data hash, normalized config, code/package version, engine name/version, and seed
-- a unique `run_id` for storage, optionally derived from fingerprint plus timestamp or a collision suffix
+Issue #11 adds a bit-for-bit reproducibility CI test after the backend exists. That is necessary, but reproducibility is also a deciding constraint for #1. Different engines, BLAS settings, chain parallelism, and sampler implementations may behave differently across platforms.
 
-That gives refresh/accountability reports a stable way to say "same analytical setup" without forbidding repeated run artifacts.
+Suggested fix: add reproducibility to the Phase -1 engine decision criteria: same data, config, and seed should produce byte-identical `PosteriorSummary` on repeated runs in the same clean environment. If cross-platform bit-for-bit identity is required, test that explicitly during #1 rather than discovering it after the engine has been chosen.
 
-### 5. The validation skip path needs a product decision
+### 6. Trust Card persistence is unclear
 
-The data-flow diagram mentions `--skip-validation`, but the CLI scaffold does not expose it, and the PRD emphasizes that readiness diagnostics cannot be skipped silently. A skip flag may be reasonable for expert users, tests, or benchmark workflows, but it is risky for the target persona.
+Issue #19 implements Trust Card computation. Issue #30 says `report` loads a `TrustCard` from the run, but #10 does not list a Trust Card artifact and the architecture's run directory does not include one.
 
-Suggested fix: either remove `--skip-validation` from the architecture for now, or document it as an expert-only flag that requires an explicit reason and is recorded in the run artifact and Trust Card.
+Suggested fix: decide whether Trust Cards are persisted as `trust_card.json` or recomputed from `summary.json`, `manifest.json`, and any `refresh_diff.json` each time. I prefer persisting the computed card with a schema version, because it makes reports auditable and keeps the exact status visible after thresholds change in future versions.
 
-### 6. "Quick mode" has two meanings
+### 7. Structural break detection may need a dependency decision
 
-Section 3.2 says runtime modes (`quick`, `standard`, `full`) control sampler effort only and keep the model specification identical. Section 3.16 describes xgboost as a "quick-mode forecast preview." These should not share the same label unless they are intentionally part of one user-facing mode.
+Issue #14 suggests using a robust change-point library such as `ruptures`. That may be reasonable, but it would become a production dependency in a core command. It should be evaluated with the same install-friction and local-first discipline as the engine, even though it is smaller.
 
-Suggested fix: reserve `runtime_mode=quick` for Bayesian sampler effort, and call the xgboost path something like `preview_forecast` or `xgb_crosscheck`. This avoids accidental misuse of xgboost as a substitute model.
+Suggested fix: make #14 include a mini dependency decision: dependency size, install behavior on Windows/macOS/Linux, deterministic behavior, and whether a simpler in-house method is sufficient for v1.
 
-### 7. The no-network CI gate is helpful but overstated
+## Smaller Notes
 
-`tests/test_no_network_in_core.py` is a good fast guardrail, but the architecture describes it as walking the import graph and rejecting banned modules. In practice, it catches modules imported at import time. It may miss optional or lazy imports inside functions until those functions execute.
-
-Suggested fix: keep the current test, but describe it as a fast import-time guardrail. Add a planned source scan or command-level network-isolated integration test for the six core commands once they are implemented.
-
-### 8. Reference paths have drifted
-
-The architecture links to `adstock_and_saturation.md` as if it lives in `docs/`, while `AGENTS.md` says the canonical path is `docs/references/adstock_and_saturation.md`. In the current repo, the file appears at the repository root as `adstock_and_saturation.md`.
-
-This matters because the transform rules say contributors must read the canonical reference before changing statistical code.
-
-Suggested fix: move or copy the reference to `docs/references/adstock_and_saturation.md`, then update `architecture.md`, `AGENTS.md`, and transform docstrings to point to the same path.
-
-### 9. Encoding/mojibake should be fixed early
-
-Several docs and code comments display mojibake: punctuation and arrows are rendered as garbled `a`-with-circumflex sequences, and box-drawing diagrams do not render cleanly. This is not an architectural flaw, but documentation quality is a v1 deliverable and trust is part of the product. Broken punctuation in the core docs undercuts that tone.
-
-Suggested fix: normalize affected Markdown and docstrings to UTF-8, or convert decorative punctuation and diagrams to plain ASCII.
-
-## Smaller Suggestions
-
-- Consider adding a formal `docs/decisions/` directory for Phase -1 engine selection and other architectural decisions. The PRD refers to a decision log, but the repository does not yet have one.
-- Define ownership for plotting/data visualization. Reports own templates, but response curve extrapolation warnings will likely need reusable chart data contracts.
-- Consider making benchmark dataset generation scripts explicit. Loaders are planned, but reproducible synthetic data generation is as important as loading committed CSVs.
-- Clarify whether `diagnose` operates from CSV-only input or from full YAML config. The CLI takes only a CSV, while many checks need spend/control column knowledge.
-- Add a planned "run manifest" artifact that records config, package version, engine version, seed, data hash, readiness result, validation-skip status if any, and summary schema version.
+- `engine/summary.py` says summaries are serialized to the run manifest, but the architecture says `PosteriorSummary` is written to `summary.json`. The latter is correct; update the docstring when touching that file.
+- Issue #15 says structural breaks run only with `--config`, while the updated architecture marks structural breaks as config-independent. Pick one behavior and align the issue.
+- Issue #33 should probably run on release branches or nightly if running every PR is too heavy once `fit` exists. The acceptance is right; the cadence may need practicality.
+- Issue #40 mentions a one-command example, but the CLI has six commands and no `wanamaker run --example` command. Either add an issue for a one-command demo wrapper or revise the README/release checklist language.
 
 ## Recommendation
 
-Proceed with the documented architecture. The plan is coherent and appropriately scoped for Phase -1. The main thing I would fix before implementing the engine spike is the contract between `ModelSpec`, `transforms`, `engine`, and posterior summaries. That is the load-bearing boundary: if it stays vague, the first backend implementation will define the architecture by accident.
+Proceed with the plan. The architecture and issues are coherent enough to start work. Before implementing the engine backend, I would first clean up the sequencing loop around the synthetic benchmark, standardize credible interval mass at 95%, and add an artifact schema/serialization issue. Those are the places most likely to create avoidable rework later.

@@ -21,8 +21,8 @@ classifiers = [
 
 # Production dependencies.
 #
-# Deliberately omitted (pending Phase -1 engine decision per AGENTS.md):
-#   - pymc, numpyro, jax, cmdstanpy
+# Bayesian engine decision: PyMC. NumPyro/JAX and Stan remain rejected options
+# for the primary modeling role; see docs/decisions/0001-bayesian-engine-selection.md.
 # Deliberately omitted (per Hard Rules 1 & 2 — no network, no LLM):
 #   - requests, httpx, urllib3 (beyond what pip pulls in transitively)
 #   - openai, anthropic, or any LLM SDK
@@ -30,6 +30,7 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
     "pydantic>=2.6",
+    "pymc>=5.0",
     "pyyaml>=6.0",
     "typer>=0.12",
     "jinja2>=3.1",
@@ -87,7 +88,7 @@ addopts = "-ra --strict-markers"
 markers = [
     "benchmark: benchmark-driven acceptance tests (slow)",
     "integration: end-to-end integration tests",
-    "engine: requires a configured Bayesian engine (skipped pre-Phase -1)",
+    "engine: requires the PyMC Bayesian engine backend",
 ]
 
 [tool.mypy]

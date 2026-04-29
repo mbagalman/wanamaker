@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
-from wanamaker.transforms.adstock import geometric_adstock, half_life_to_decay
-
+from wanamaker.transforms.adstock import (
+    geometric_adstock,
+    half_life_to_decay,
+    weibull_adstock,
+)
 
 # ---------------------------------------------------------------------------
 # half_life_to_decay
@@ -220,3 +224,102 @@ class TestGeometricAdstockOutputProperties:
         result = geometric_adstock(spend, decay=decay)
         steady_state = 1.0 / (1.0 - decay)  # = 10.0
         assert result[-1] == pytest.approx(steady_state, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# weibull_adstock
+# ---------------------------------------------------------------------------
+
+
+class TestWeibullAdstockValidation:
+    def test_shape_must_be_positive(self) -> None:
+        with pytest.raises(ValueError, match="shape must be strictly positive"):
+            weibull_adstock(np.array([1.0]), shape=0.0, scale=2.0)
+
+    def test_scale_must_be_positive(self) -> None:
+        with pytest.raises(ValueError, match="scale must be strictly positive"):
+            weibull_adstock(np.array([1.0]), shape=2.0, scale=0.0)
+
+    def test_variant_must_be_known(self) -> None:
+        with pytest.raises(ValueError, match="variant must be 'cdf' or 'pdf'"):
+            weibull_adstock(np.array([1.0]), shape=2.0, scale=2.0, variant="gamma")
+
+    def test_spend_must_be_one_dimensional(self) -> None:
+        with pytest.raises(ValueError, match="1-D array"):
+            weibull_adstock(np.ones((2, 2)), shape=2.0, scale=2.0)
+
+
+class TestWeibullAdstockKnownOutputs:
+    def test_cdf_single_impulse_default_shape_scale(self) -> None:
+        """CDF variant with shape=2, scale=2 uses Weibull survival weights.
+
+        For a unit impulse, output equals the lag weights:
+        w_lag = exp(-((lag / 2) ** 2)).
+        """
+        spend = np.array([1.0, 0.0, 0.0, 0.0])
+        result = weibull_adstock(spend)
+        expected = np.exp(-np.array([0.0, 0.25, 1.0, 2.25]))
+        np.testing.assert_allclose(result, expected)
+
+    def test_cdf_shape_one_matches_geometric_decay(self) -> None:
+        """CDF Weibull with shape=1 is geometric adstock.
+
+        exp(-(lag / scale)) = exp(-1 / scale) ** lag.
+        """
+        spend = np.array([2.0, 3.0, 1.0, 0.0, 4.0])
+        scale = 2.0
+        weibull = weibull_adstock(spend, shape=1.0, scale=scale, variant="cdf")
+        geometric = geometric_adstock(spend, decay=float(np.exp(-1.0 / scale)))
+        np.testing.assert_allclose(weibull, geometric, rtol=1e-12)
+
+    def test_pdf_single_impulse_has_lagged_peak_shape(self) -> None:
+        """PDF variant uses normalized Weibull density weights.
+
+        With shape=2 and scale=2, the first few raw weights are:
+        (lag / 2) * exp(-((lag / 2) ** 2)), normalized by the maximum.
+        """
+        spend = np.array([1.0, 0.0, 0.0, 0.0])
+        result = weibull_adstock(spend, shape=2.0, scale=2.0, variant="pdf")
+        lags = np.array([1.0, 2.0, 3.0, 4.0])
+        raw = (lags / 2.0) * np.exp(-((lags / 2.0) ** 2))
+        expected = raw / raw.max()
+        np.testing.assert_allclose(result, expected)
+
+    def test_two_consecutive_periods_cdf(self) -> None:
+        spend = np.array([1.0, 1.0, 0.0])
+        weights = np.exp(-np.array([0.0, 0.25, 1.0]))
+        result = weibull_adstock(spend, shape=2.0, scale=2.0)
+        expected = np.array([
+            1.0,
+            1.0 + weights[1],
+            weights[1] + weights[2],
+        ])
+        np.testing.assert_allclose(result, expected)
+
+
+class TestWeibullAdstockOutputProperties:
+    def test_output_shape_matches_input(self) -> None:
+        spend = np.ones(52)
+        result = weibull_adstock(spend, shape=2.0, scale=2.0)
+        assert result.shape == spend.shape
+
+    def test_output_dtype_is_float64(self) -> None:
+        spend = np.ones(5, dtype=np.float64)
+        result = weibull_adstock(spend, shape=2.0, scale=2.0)
+        assert result.dtype == np.float64
+
+    def test_integer_input_accepted(self) -> None:
+        spend = np.array([1, 2, 3, 4], dtype=np.int32)
+        result = weibull_adstock(spend, shape=2.0, scale=2.0)
+        assert result.dtype == np.float64
+
+    def test_empty_input_returns_empty_array(self) -> None:
+        result = weibull_adstock(np.array([], dtype=np.float64), shape=2.0, scale=2.0)
+        assert result.dtype == np.float64
+        assert result.size == 0
+
+    def test_non_negative_spend_produces_non_negative_output(self) -> None:
+        rng = np.random.default_rng(0)
+        spend = rng.uniform(0, 1000, size=100)
+        result = weibull_adstock(spend, shape=2.0, scale=2.0)
+        assert (result >= 0).all()

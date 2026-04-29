@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from wanamaker.engine.summary import PosteriorSummary
+
 
 @dataclass(frozen=True)
 class Posterior:
@@ -32,6 +34,8 @@ class FitResult:
     """Output of an engine fit."""
 
     posterior: Posterior
+    summary: PosteriorSummary
+    """Engine-neutral posterior summary consumed by downstream modules."""
     diagnostics: dict[str, Any]
     """Convergence statistics: r-hat, effective sample size, divergences, etc."""
 

@@ -1,12 +1,10 @@
 """Bayesian engine abstraction layer.
 
-Per AGENTS.md: the engine choice (PyMC vs. NumPyro vs. Stan) is the output
-of Phase -1 and is **not yet decided**. Feature code must import from
-``wanamaker.engine`` and never from a specific library, so we can swap
-without rewriting features.
+PyMC is the selected Bayesian engine, but feature code must import from
+``wanamaker.engine`` rather than importing PyMC directly. PyMC-specific code
+belongs in ``wanamaker.engine.pymc`` and backend-specific tests.
 
-The current leading candidate is PyMC (BRD/PRD Section 9). xgboost is
-explicitly *not* a candidate for the modeling role — see Hard Rule 3.
+xgboost is explicitly not a candidate for the modeling role; see Hard Rule 3.
 """
 
 from wanamaker.engine.base import Engine, FitResult, Posterior

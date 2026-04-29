@@ -46,16 +46,19 @@ These are architectural invariants. Violating them means rebuilding the project'
 
 ---
 
-## Engine choice — currently undecided
+## Engine choice
 
-The Bayesian engine choice (PyMC vs. NumPyro vs. Stan) is the output of Phase -1 and is **not yet decided**. Until Phase -1 concludes:
+The Bayesian engine choice is **PyMC**. The decision is recorded in
+`docs/decisions/0001-bayesian-engine-selection.md`.
 
-- Write modeling code against a thin abstraction layer (`wanamaker.engine.*`) that hides the specific library
-- Don't import PyMC or NumPyro directly from feature code
-- Don't add either to the production dependencies in `pyproject.toml` until the decision is made
-- Tests can use whatever engine is convenient for prototyping; mark them clearly
+Rules after the decision:
 
-The current leading candidate is PyMC. The current rejected option for the modeling role is xgboost (see BRD/PRD Section 9 for the reasoning).
+- Write modeling code against the abstraction layer (`wanamaker.engine.*`) that hides PyMC from feature code.
+- Do not import PyMC directly from `model`, `forecast`, `refresh`, `reports`, `trust_card`, `advisor`, `diagnose`, or CLI code.
+- PyMC imports belong in `wanamaker.engine.pymc` and backend-specific tests only.
+- NumPyro/JAX and Stan are not production dependencies unless the engine decision is explicitly revisited.
+
+The rejected option for the modeling role is xgboost (see BRD/PRD Section 9 for the reasoning). xgboost remains limited to the explicitly labeled forecast preview and validation cross-check paths.
 
 ---
 

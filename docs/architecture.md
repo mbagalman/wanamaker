@@ -1,8 +1,8 @@
 # Wanamaker -- Architecture and Technical Specification
 
 **Audience:** Developers and AI coding assistants working on the codebase.
-**Companion documents:** [`docs/wanamaker_brd_prd.md`](wanamaker_brd_prd.md) (what and why), [`AGENTS.md`](../AGENTS.md) (hard rules and coding conventions).
-**Status:** Phase -1 (engine decision spike). Most modules are scaffolded but not yet implemented.
+**Companion documents:** [`docs/wanamaker_brd_prd.md`](wanamaker_brd_prd.md) (what and why), [`AGENTS.md`](https://github.com/mbagalman/wanamaker/blob/main/AGENTS.md) (hard rules and coding conventions).
+**Status:** Phase -1 / early Phase 0. PyMC has been selected as the Bayesian engine; most modules are scaffolded but not yet implemented.
 
 ---
 
@@ -11,7 +11,7 @@
 Three principles shape every architectural decision:
 
 1. **Trust is the product.** The module structure, naming, and data flow are all oriented around making the model's behavior auditable and reproducible -- not convenient or clever. When in doubt, choose transparency over elegance.
-2. **Engine-agnostic core.** The Bayesian engine (PyMC / NumPyro / Stan) is not yet decided. All feature code must interface through `wanamaker.engine` and never import a specific library directly.
+2. **Engine-isolated core.** PyMC is the selected Bayesian engine, but feature code must still interface through `wanamaker.engine` and never import PyMC directly.
 3. **Local-first, always.** No module in the core code path may import an HTTP client, telemetry library, or LLM SDK. This is enforced by a CI test (`tests/test_no_network_in_core.py`), not just convention.
 
 ---
@@ -181,7 +181,7 @@ Implements `wanamaker diagnose` (FR-2). Runs before fitting; cannot be silently 
 
 The most important architectural boundary in the codebase. All feature code must import from `wanamaker.engine`, never from `pymc`, `numpyro`, or `cmdstanpy` directly.
 
-**Current state:** Protocol and typed summaries defined; no backend implemented. Phase -1 will produce the concrete implementation (see `docs/decisions/0001-bayesian-engine-selection.md`).
+**Current state:** Protocol and typed summaries defined; PyMC selected; concrete backend not yet implemented. See `docs/decisions/0001-bayesian-engine-selection.md`.
 
 | File | Responsibility |
 |---|---|
@@ -192,7 +192,7 @@ The most important architectural boundary in the codebase. All feature code must
 
 ```python
 class Engine(Protocol):
-    name: str  # "pymc" | "numpyro" | "stan"
+    name: str  # "pymc"
 
     def fit(self, model_spec: ModelSpec, data: DataFrame,
             seed: int, runtime_mode: str) -> FitResult: ...
@@ -217,14 +217,7 @@ All downstream modules (refresh/diff, trust_card, reports, forecast, advisor) de
 | `ConvergenceSummary` | trust_card (convergence dimension) |
 | `PosteriorSummary` | top-level container; written to `summary.json` |
 
-**Phase -1 engine candidates** (ordered by current presumed fit):
-1. **PyMC** -- leading candidate; pip-installable on all platforms; mature; ArviZ integration
-2. **NumPyro/JAX** -- technically excellent; installation friction on Windows is the risk
-3. **Stan via cmdstanpy** -- highest library quality; C++ compile step adds friction
-
-Decision criterion: *can the target user install it on Windows in 5 minutes and get a result in under 30 minutes on a laptop CPU?*
-
-Once chosen, the backend lives at e.g. `engine/pymc.py` -- a concrete class implementing the `Engine` Protocol.
+**Selected backend:** PyMC. The backend lives at `engine/pymc.py` and implements the `Engine` Protocol. NumPyro/JAX and Stan were rejected for the primary modeling role because their installation and toolchain risks are less compatible with Wanamaker's target persona.
 
 ### 3.8 `transforms/` -- Canonical Mathematical Formulas
 
@@ -578,8 +571,9 @@ These are not guidelines -- violating them means rebuilding the project's credib
 | `typer >= 0.12` | CLI |
 | `jinja2 >= 3.1` | Report template rendering |
 | `matplotlib >= 3.8`, `seaborn >= 0.13` | Static report charts |
+| `pymc >= 5.0` | Selected Bayesian modeling engine |
 
-**Intentionally omitted (pending Phase -1):** `pymc`, `numpyro`, `jax`, `cmdstanpy` -- not added until the engine decision is made.
+**Intentionally omitted:** `numpyro`, `jax`, `cmdstanpy` -- rejected for the primary modeling role unless the engine decision is revisited.
 
 **Optional extras:**
 - `.[xgboost]` -- adds `xgboost >= 2.0` for `xgb_preview` and `xgb_crosscheck` only
@@ -610,9 +604,8 @@ These are not guidelines -- violating them means rebuilding the project's credib
 
 | Decision | Options | Resolution path |
 |---|---|---|
-| **Bayesian engine** | PyMC (leading), NumPyro/JAX, Stan | Phase -1 spike; see `docs/decisions/0001-bayesian-engine-selection.md` |
 | **Default anchoring weight** | Currently 0.3 (placeholder) | Phase 1: calibration against refresh stability benchmark |
-| **Primary recommended install path** | pip vs. Docker | Follows from engine decision (JAX friction -> Docker first) |
+| **Primary recommended install path** | pip vs. Docker | Validate PyMC install in cross-platform CI; pip remains the target path unless CI proves otherwise |
 | **Interactive charts** | matplotlib/seaborn (static) vs. plotly (interactive HTML) | Phase 2: user testing feedback |
 | **ModelSpec full schema** | Planned fields in Section 3.9 | Phase 0: before backend spike hardens around an accidental minimum |
 
