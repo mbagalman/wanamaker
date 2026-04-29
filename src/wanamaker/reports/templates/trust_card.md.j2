@@ -1,0 +1,12 @@
+{# Trust Card template (FR-5.4). Placeholder skeleton; expanded in Phase 1.
+
+   Required context keys:
+     - dimensions: [{name, status, explanation}]
+#}
+# Model Trust Card
+
+| Dimension | Status | Notes |
+|---|---|---|
+{% for d in dimensions %}
+| {{ d.name }} | {{ d.status }} | {{ d.explanation }} |
+{% endfor %}
