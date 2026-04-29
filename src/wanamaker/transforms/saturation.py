@@ -4,9 +4,15 @@ Saturation models diminishing returns: each additional dollar of spend
 produces less incremental impact than the last. v1 uses the **Hill function**,
 parameterized by an EC50 (the spend at half-maximum response) and a slope.
 
+These functions own the canonical mathematical formulas and serve as
+test fixtures and documentation references. EC50 and slope are sampled
+parameters inside the engine backend's probabilistic program, not fixed
+values passed in before fitting. See ``wanamaker.engine``.
+
 Reference:
 - Hill function in MMM: Jin et al. (Google), "Bayesian Methods for Media
-  Mix Modeling with Carryover and Shape Effects" (2017), §4.
+  Mix Modeling with Carryover and Shape Effects" (2017), sec. 4.
+- Canonical parameter ranges: docs/references/adstock_and_saturation.md
 
 Per FR-5.1, when response curves are shown, the portion that extrapolates
 beyond historical observed spend must be visually distinguished. That

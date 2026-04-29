@@ -10,5 +10,21 @@ explicitly *not* a candidate for the modeling role — see Hard Rule 3.
 """
 
 from wanamaker.engine.base import Engine, FitResult, Posterior
+from wanamaker.engine.summary import (
+    ChannelContributionSummary,
+    ConvergenceSummary,
+    ParameterSummary,
+    PosteriorSummary,
+    PredictiveSummary,
+)
 
-__all__ = ["Engine", "FitResult", "Posterior"]
+__all__ = [
+    "Engine",
+    "FitResult",
+    "Posterior",
+    "PosteriorSummary",
+    "ParameterSummary",
+    "ChannelContributionSummary",
+    "PredictiveSummary",
+    "ConvergenceSummary",
+]

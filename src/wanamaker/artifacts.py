@@ -6,6 +6,7 @@ Every model fit produces a versioned artifact under the project-local
     .wanamaker/
     └── runs/
         └── <run_id>/
+            ├── manifest.json        # run fingerprint, seed, engine, schema version
             ├── config.yaml          # snapshot of the run config
             ├── data_hash.txt        # sha256 of the input CSV
             ├── posterior.nc         # posterior draws (engine-native format)
@@ -13,12 +14,19 @@ Every model fit produces a versioned artifact under the project-local
             ├── timestamp.txt        # ISO-8601 UTC fit timestamp
             └── engine.txt           # name + version of the Bayesian engine
 
-Run IDs are short content-addressed identifiers derived from the data hash,
-the config, and the timestamp — they are stable for a given (data, config)
-pair within the same minute, so identical re-runs don't proliferate
-directories.
+Two identity concepts are kept separate:
 
-This module owns directory layout, file naming, and reproducible run IDs.
+- **run_fingerprint**: a deterministic hash of (data_hash, normalized config,
+  package version, engine name/version, seed). Two runs with the same
+  fingerprint produced identical analytical inputs and should produce
+  identical results. Used by refresh/diff to detect "same analytical setup."
+
+- **run_id**: the storage key, derived from run_fingerprint plus a UTC
+  timestamp. Unique per execution. Repeated runs of the same (data, config,
+  seed) produce separate run_ids pointing to the same run_fingerprint --
+  they are distinct artifacts but analytically equivalent.
+
+This module owns directory layout, file naming, and these two identities.
 It does not own the contents of ``posterior.nc`` or ``summary.json``;
 those live in the engine and refresh modules respectively.
 """
@@ -35,6 +43,10 @@ class RunPaths:
     """Resolved filesystem paths for a single run's artifacts."""
 
     root: Path
+
+    @property
+    def manifest(self) -> Path:
+        return self.root / "manifest.json"
 
     @property
     def config(self) -> Path:
@@ -68,6 +80,38 @@ def hash_file(path: Path, chunk_size: int = 1 << 16) -> str:
         while chunk := f.read(chunk_size):
             h.update(chunk)
     return h.hexdigest()
+
+
+def make_run_fingerprint(
+    data_hash: str,
+    config_hash: str,
+    package_version: str,
+    engine_name: str,
+    engine_version: str,
+    seed: int,
+) -> str:
+    """Return a deterministic fingerprint for an analytical setup.
+
+    Two runs with the same fingerprint used identical inputs and should
+    produce identical results (NFR-2). This is used by the refresh diff
+    to identify "same analytical setup" regardless of when it ran.
+
+    Args:
+        data_hash: SHA-256 of the input CSV.
+        config_hash: SHA-256 of the normalized config YAML.
+        package_version: ``wanamaker.__version__``.
+        engine_name: Stable engine identifier (e.g. ``"pymc"``).
+        engine_version: Engine library version string.
+        seed: The top-level random seed from config.
+
+    Returns:
+        Lowercase hex BLAKE2b fingerprint (16 bytes, 32 hex chars).
+    """
+    payload = "|".join([
+        data_hash, config_hash, package_version,
+        engine_name, engine_version, str(seed),
+    ])
+    return hashlib.blake2b(payload.encode(), digest_size=16).hexdigest()
 
 
 def run_paths(artifact_dir: Path, run_id: str) -> RunPaths:

@@ -5,12 +5,19 @@ a purchase today may be influenced by an ad seen last week. v1 ships
 **geometric** adstock as the default, with **Weibull** available as a
 per-channel override.
 
+These functions own the canonical mathematical formulas and serve as
+test fixtures and documentation references. The actual application of
+adstock inside a model fit happens within the engine backend's
+probabilistic program (where decay/shape/scale are sampled parameters),
+not as a preprocessing step on fixed values. See ``wanamaker.engine``.
+
 References:
 - Geometric adstock: Hanssens, Parsons & Schultz, *Market Response Models*
-  (2nd ed., 2001), §10.3. The classic single-parameter recurrence
-  ``x_t' = x_t + λ · x_{t-1}'`` with λ ∈ [0, 1).
+  (2nd ed., 2001), ch. 10. The classic single-parameter recurrence
+  ``A_t = X_t + decay * A_{t-1}`` with decay in [0, 1).
 - Weibull adstock: Jin et al. (Google), "Bayesian Methods for Media Mix
-  Modeling with Carryover and Shape Effects" (2017), §3.
+  Modeling with Carryover and Shape Effects" (2017), sec. 3.
+- Canonical parameter ranges: docs/references/adstock_and_saturation.md
 
 Per FR-3.4, the adstock family does **not** auto-flip across refreshes
 (that would compromise refresh accountability). Selection is user-driven

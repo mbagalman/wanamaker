@@ -34,6 +34,18 @@ app = typer.Typer(
 @app.command()
 def diagnose(
     data: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        exists=True,
+        help=(
+            "Optional YAML config. When provided, spend and control columns are "
+            "read from the config and all checks run. Without it, only checks that "
+            "do not require column knowledge (history length, date regularity, "
+            "structural breaks) are run, and a warning is emitted."
+        ),
+    ),
 ) -> None:
     """Run the pre-flight data readiness diagnostic (FR-2.1)."""
     raise NotImplementedError("Phase 1: wire up diagnose command")
@@ -42,6 +54,17 @@ def diagnose(
 @app.command()
 def fit(
     config: Path = typer.Option(..., "--config", "-c", exists=True),
+    skip_validation: bool = typer.Option(
+        False,
+        "--skip-validation",
+        help=(
+            "Expert flag: bypass the data readiness diagnostic. "
+            "Use only in automated pipelines or test harnesses. "
+            "When set, the skip is recorded in the run manifest and "
+            "flagged on the Trust Card. Not recommended for production analyses."
+        ),
+        hidden=True,
+    ),
 ) -> None:
     """Fit the Bayesian model and persist a versioned run artifact (FR-3, FR-4.1)."""
     raise NotImplementedError("Phase 0/1: wire up fit command")

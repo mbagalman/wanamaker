@@ -35,7 +35,7 @@ These are architectural invariants. Violating them means rebuilding the project'
    - Be reviewed by a human before merge, even if all tests pass
    - Have any default parameter values cross-checked against the PRD
 
-   **Before implementing or modifying any adstock or saturation transformation, read `docs/references/adstock_and_saturation.md`.** It contains the canonical formulas, default priors per channel category, estimation method tradeoffs, and diagnostic patterns that should govern all transformation code.
+   **Before implementing or modifying any adstock or saturation transformation, read [`docs/references/adstock_and_saturation.md`](docs/references/adstock_and_saturation.md).** It contains the canonical formulas, default priors per channel category, estimation method tradeoffs, and diagnostic patterns that should govern all transformation code.
 
 5. **Reproducibility is a contract.** Per NFR-2, given the same input data, configuration, and random seed, results must be bit-for-bit identical. This means:
    - Use a single, documented seeding discipline. The seed is configured at the top level and passed down explicitly. Do not call `np.random.seed()` or `random.seed()` inside library functions.
@@ -103,7 +103,7 @@ wanamaker/
 │   ├── cmo_guide.md        # "What Wanamaker Tells Your CMO"
 │   ├── comparison.md       # vs. Robyn/Meridian/Recast/PyMC-Marketing
 │   └── references/
-│       └── adstock_and_saturation.md  # canonical reference for transforms
+│       └── adstock_and_saturation.md  # canonical reference for transforms (docs/references/)
 ├── examples/
 ├── benchmark_data/         # synthetic + public datasets
 ├── pyproject.toml
