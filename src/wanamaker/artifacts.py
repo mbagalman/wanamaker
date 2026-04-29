@@ -35,9 +35,12 @@ those live in the engine and refresh modules respectively.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -137,3 +140,53 @@ def list_runs(artifact_dir: Path) -> list[str]:
     if not runs_dir.exists():
         return []
     return sorted(p.name for p in runs_dir.iterdir() if p.is_dir())
+
+
+def hash_config(config_dict: dict[str, Any]) -> str:
+    """Return a deterministic SHA-256 hash of a config dict.
+
+    The dict is serialised to JSON with sorted keys so that field ordering
+    differences do not produce different hashes.  Only analytical fields
+    should be included (exclude ``artifact_dir`` and other storage paths).
+    """
+    canonical = json.dumps(config_dict, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def serialize_summary(summary: Any) -> str:
+    """Serialize a ``PosteriorSummary`` frozen dataclass to a JSON string.
+
+    Uses ``dataclasses.asdict`` recursively so all nested frozen dataclasses
+    (``ParameterSummary``, ``ChannelContributionSummary``, etc.) are
+    converted to plain dicts.  The result is suitable for writing to
+    ``summary.json``.
+    """
+    return json.dumps(dataclasses.asdict(summary), indent=2, default=str)
+
+
+def write_manifest(
+    paths: RunPaths,
+    *,
+    run_id: str,
+    run_fingerprint: str,
+    timestamp: str,
+    seed: int,
+    engine_name: str,
+    engine_version: str,
+    wanamaker_version: str,
+    skip_validation: bool,
+    readiness_level: str | None,
+) -> None:
+    """Write ``manifest.json`` to the run artifact directory."""
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "run_fingerprint": run_fingerprint,
+        "timestamp": timestamp,
+        "seed": seed,
+        "engine": {"name": engine_name, "version": engine_version},
+        "wanamaker_version": wanamaker_version,
+        "skip_validation": skip_validation,
+        "readiness_level": readiness_level,
+    }
+    paths.manifest.write_text(json.dumps(manifest, indent=2))
