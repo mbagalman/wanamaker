@@ -407,6 +407,7 @@ def deserialize_refresh_diff(json_str: str) -> Any:
         ValueError: If the schema version does not match ``REFRESH_DIFF_SCHEMA_VERSION``.
         json.JSONDecodeError: If ``json_str`` is not valid JSON.
     """
+    from wanamaker.refresh.classify import MovementClass
     from wanamaker.refresh.diff import ParameterMovement, RefreshDiff
 
     d: dict[str, Any] = _unwrap(json_str, REFRESH_DIFF_SCHEMA_VERSION, "refresh_diff.json")
@@ -417,6 +418,11 @@ def deserialize_refresh_diff(json_str: str) -> Any:
             current_mean=float(m["current_mean"]),
             previous_ci=(float(m["previous_ci"][0]), float(m["previous_ci"][1])),
             current_ci=(float(m["current_ci"][0]), float(m["current_ci"][1])),
+            movement_class=(
+                MovementClass(m["movement_class"])
+                if m.get("movement_class") is not None
+                else None
+            ),
         )
         for m in d.get("movements", [])
     ]
