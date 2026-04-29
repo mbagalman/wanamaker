@@ -48,4 +48,16 @@ def hill_saturation(
     Raises:
         ValueError: If ``ec50`` or ``slope`` is non-positive.
     """
-    raise NotImplementedError("Phase 0: Hill saturation — needs unit tests vs known output")
+    if ec50 <= 0:
+        raise ValueError(f"ec50 must be strictly positive; got {ec50!r}")
+    if slope <= 0:
+        raise ValueError(f"slope must be strictly positive; got {slope!r}")
+
+    spend = np.asarray(spend, dtype=np.float64)
+    # Handle zero/negative spend gracefully by returning zeros where spend <= 0
+    # to avoid warnings/errors with powers, although caller should pass positive spend
+    out = np.zeros_like(spend)
+    mask = spend > 0
+    s = spend[mask]
+    out[mask] = (s ** slope) / (s ** slope + ec50 ** slope)
+    return out
