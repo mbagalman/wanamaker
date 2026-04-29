@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-BENCHMARK_DIR = Path(__file__).parent.parent.parent.parent / "benchmark_data"
+BENCHMARK_DIR = Path(__file__).resolve().parents[3] / "benchmark_data"
 
 
 def load_public_example() -> pd.DataFrame:
@@ -22,17 +22,18 @@ def load_public_example() -> pd.DataFrame:
 
 def load_synthetic_ground_truth() -> tuple[pd.DataFrame, dict]:
     """Return (data, ground_truth_contributions)."""
-    csv_path = BENCHMARK_DIR / "synthetic_ground_truth.csv"
-    json_path = BENCHMARK_DIR / "synthetic_ground_truth.json"
-
-    if not csv_path.exists() or not json_path.exists():
+    data_path = BENCHMARK_DIR / "synthetic_ground_truth.csv"
+    truth_path = BENCHMARK_DIR / "synthetic_ground_truth_ground_truth.json"
+    if not data_path.exists():
         raise FileNotFoundError(
-            "Synthetic ground truth files not found. "
-            "Run benchmark_data/generate_synthetic_ground_truth.py first."
+            f"synthetic ground-truth CSV not found at {data_path}. "
+            "Run benchmark_data/generate_synthetic_ground_truth.py."
         )
-
-    df = pd.read_csv(csv_path)
-    with open(json_path) as f:
-        ground_truth = json.load(f)
-
-    return df, ground_truth
+    if not truth_path.exists():
+        raise FileNotFoundError(
+            f"synthetic ground-truth metadata not found at {truth_path}. "
+            "Run benchmark_data/generate_synthetic_ground_truth.py."
+        )
+    data = pd.read_csv(data_path, parse_dates=["week"])
+    truth = json.loads(truth_path.read_text(encoding="utf-8"))
+    return data, truth
