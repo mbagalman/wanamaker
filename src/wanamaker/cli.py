@@ -402,14 +402,172 @@ def compare_scenarios(
 @app.command()
 def refresh(
     config: Path = typer.Option(..., "--config", "-c", exists=True),
-    anchor_strength: str = typer.Option(
-        "medium",
+    anchor_strength: str | None = typer.Option(
+        None,
         "--anchor-strength",
-        help="One of: none, light, medium, heavy, or a float in [0, 1]. See FR-4.4.",
+        help=(
+            "Override the config's anchor strength. One of: none, light, "
+            "medium, heavy, or a float in [0, 1]. See FR-4.4."
+        ),
+    ),
+    skip_validation: bool = typer.Option(
+        False,
+        "--skip-validation",
+        help=(
+            "Expert flag: bypass the data readiness diagnostic. "
+            "Recorded in the run manifest and flagged on the Trust Card."
+        ),
+        hidden=True,
     ),
 ) -> None:
     """Re-run the model with light posterior anchoring and emit a diff (FR-4)."""
-    raise NotImplementedError("Phase 1: wire up refresh command")
+    import dataclasses
+
+    from wanamaker import __version__
+    from wanamaker.artifacts import (
+        hash_config,
+        hash_file,
+        make_run_fingerprint,
+        run_paths,
+        serialize_refresh_diff,
+        serialize_summary,
+        write_manifest,
+    )
+    from wanamaker.config import load_config
+    from wanamaker.data.io import load_input_csv
+    from wanamaker.engine.pymc import PyMCEngine
+    from wanamaker.model.builder import build_model_spec
+    from wanamaker.refresh.diff import compute_diff
+
+    # ------------------------------------------------------------------
+    # 1. Load config and resolve anchor strength (CLI overrides config)
+    # ------------------------------------------------------------------
+    typer.echo(f"Loading config: {config}")
+    cfg = load_config(config)
+
+    raw_anchor = anchor_strength if anchor_strength is not None else cfg.refresh.anchor_strength
+    weight = _resolve_anchor_strength(raw_anchor)
+    typer.echo(f"Anchor strength: {raw_anchor!r} (weight={weight:.3f})")
+
+    # ------------------------------------------------------------------
+    # 2. Load data
+    # ------------------------------------------------------------------
+    typer.echo(f"Loading data: {cfg.data.csv_path}")
+    data = load_input_csv(cfg.data)
+    typer.echo(f"  {len(data)} rows × {len(data.columns)} columns")
+
+    # ------------------------------------------------------------------
+    # 3. Find the most recent prior run for this data file
+    # ------------------------------------------------------------------
+    prev_run_id, prev_summary = _find_previous_run(cfg.run.artifact_dir, cfg.data.csv_path)
+    if prev_run_id is None:
+        typer.echo(
+            typer.style(
+                f"Error: no previous run found in {cfg.run.artifact_dir / 'runs'} for "
+                f"data file {cfg.data.csv_path}. Run 'wanamaker fit --config {config}' first.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"Previous run: {prev_run_id}")
+
+    # ------------------------------------------------------------------
+    # 4. Diagnostic (or record skip)
+    # ------------------------------------------------------------------
+    readiness_level: str | None
+    if skip_validation:
+        typer.echo(
+            typer.style(
+                "WARNING: --skip-validation set. Diagnostic bypassed. "
+                "This will be recorded in the run manifest.",
+                fg=typer.colors.YELLOW,
+            )
+        )
+        readiness_level = "skipped"
+    else:
+        readiness_level = _run_diagnostics(data, cfg)
+
+    # ------------------------------------------------------------------
+    # 5. Build ModelSpec with anchor priors derived from the previous run
+    # ------------------------------------------------------------------
+    base_spec = build_model_spec(cfg)
+    anchor_priors = _build_anchor_priors(prev_summary, weight)
+    model_spec = dataclasses.replace(base_spec, anchor_priors=anchor_priors)
+    typer.echo(
+        f"Model: {len(model_spec.channels)} channel(s), "
+        f"{len(model_spec.control_columns)} control(s), "
+        f"runtime_mode={model_spec.runtime_mode}, "
+        f"anchored_params={len(anchor_priors)}"
+    )
+
+    # ------------------------------------------------------------------
+    # 6. Hashes, fingerprint, run_id
+    # ------------------------------------------------------------------
+    data_hash = hash_file(cfg.data.csv_path)
+    config_hash = _analytical_config_hash(cfg, hash_config)
+    engine = PyMCEngine()
+    engine_version = _get_pymc_version()
+    fingerprint = make_run_fingerprint(
+        data_hash=data_hash,
+        config_hash=config_hash,
+        package_version=__version__,
+        engine_name=engine.name,
+        engine_version=engine_version,
+        seed=cfg.run.seed,
+    )
+    timestamp_utc = datetime.now(timezone.utc)
+    timestamp_str = timestamp_utc.strftime("%Y%m%dT%H%M%SZ")
+    run_id = f"{fingerprint[:8]}_{timestamp_str}"
+    paths = run_paths(cfg.run.artifact_dir, run_id)
+    typer.echo(f"Run ID: {run_id}")
+    typer.echo(f"Artifacts: {paths.root}")
+
+    # ------------------------------------------------------------------
+    # 7. Re-fit the model with anchored priors
+    # ------------------------------------------------------------------
+    typer.echo("Re-fitting model with anchored priors…")
+    result = engine.fit(
+        model_spec=model_spec,
+        data=data,
+        seed=cfg.run.seed,
+        runtime_mode=cfg.run.runtime_mode,
+    )
+    typer.echo("Fit complete.")
+
+    # ------------------------------------------------------------------
+    # 8. Persist standard run artifacts
+    # ------------------------------------------------------------------
+    write_manifest(
+        paths,
+        run_id=run_id,
+        run_fingerprint=fingerprint,
+        timestamp=timestamp_utc.isoformat(),
+        seed=cfg.run.seed,
+        engine_name=engine.name,
+        engine_version=engine_version,
+        wanamaker_version=__version__,
+        skip_validation=skip_validation,
+        readiness_level=readiness_level,
+    )
+    shutil.copy2(config, paths.config)
+    paths.data_hash.write_text(data_hash)
+    paths.timestamp.write_text(timestamp_utc.isoformat())
+    paths.engine.write_text(f"{engine.name}=={engine_version}")
+    paths.summary.write_text(serialize_summary(result.summary))
+    _write_posterior(result.posterior, paths.posterior)
+
+    # ------------------------------------------------------------------
+    # 9. Compute and persist the refresh diff (FR-4.2 / FR-4.3)
+    # ------------------------------------------------------------------
+    diff = compute_diff(prev_summary, result.summary, prev_run_id, run_id)
+    paths.refresh_diff.write_text(serialize_refresh_diff(diff))
+    _print_diff_summary(diff)
+
+    typer.echo(
+        typer.style(f"\nDone. Run ID: {run_id}", fg=typer.colors.GREEN, bold=True)
+    )
+    typer.echo(f"  {paths.root}")
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +728,135 @@ def _write_posterior(posterior: object, path: object) -> None:
                 fg=typer.colors.YELLOW,
             )
         )
+
+
+def _resolve_anchor_strength(value: str | float) -> float:
+    """Translate a raw CLI/YAML anchor-strength value to a numeric weight.
+
+    Strings that parse as floats are treated as numeric weights;
+    everything else is treated as a preset name and validated by
+    ``resolve_anchor_weight``.
+    """
+    from wanamaker.refresh.anchor import resolve_anchor_weight
+
+    if isinstance(value, str):
+        try:
+            parsed: str | float = float(value)
+        except ValueError:
+            parsed = value
+    else:
+        parsed = value
+    return resolve_anchor_weight(parsed)
+
+
+def _find_previous_run(
+    artifact_dir: Path, csv_path: Path
+) -> tuple[str | None, object | None]:
+    """Find the most recent prior run whose snapshotted config used ``csv_path``.
+
+    Run IDs encode an ISO timestamp, so the lexicographically newest entry
+    in ``list_runs`` is the most recent. We iterate newest-first and return
+    on the first match. Runs with missing or malformed artifacts are skipped
+    silently so a corrupt run cannot block refresh.
+
+    Args:
+        artifact_dir: Directory containing the ``runs/`` subdirectory.
+        csv_path: Data file path from the current config.
+
+    Returns:
+        A tuple ``(run_id, posterior_summary)`` for the matching run, or
+        ``(None, None)`` if no run matches.
+    """
+    from wanamaker.artifacts import deserialize_summary, list_runs, run_paths
+    from wanamaker.config import load_config
+
+    target = _normalize_path(csv_path)
+    for run_id in reversed(list_runs(artifact_dir)):
+        paths = run_paths(artifact_dir, run_id)
+        if not paths.config.exists() or not paths.summary.exists():
+            continue
+        try:
+            prev_cfg = load_config(paths.config)
+        except Exception:  # noqa: BLE001 — corrupt snapshot, skip
+            continue
+        if _normalize_path(prev_cfg.data.csv_path) != target:
+            continue
+        try:
+            summary = deserialize_summary(paths.summary.read_text())
+        except (ValueError, KeyError):
+            continue
+        return run_id, summary
+    return None, None
+
+
+def _normalize_path(path: Path) -> str:
+    """Best-effort canonical form for path comparison.
+
+    Uses ``Path.resolve`` (which works on non-existent paths) and falls
+    back to ``str(path)`` if resolution fails on the platform.
+    """
+    try:
+        return str(Path(path).resolve())
+    except OSError:
+        return str(path)
+
+
+def _build_anchor_priors(prev_summary: object, weight: float) -> dict[str, object]:
+    """Build per-parameter mixture priors from a previous PosteriorSummary.
+
+    Every scalar parameter from the previous run is given a corresponding
+    ``AnchoredPrior`` keyed by the parameter's stable name. The PyMC engine
+    only consumes the keys it recognises (e.g. ``channel.<n>.half_life``)
+    and silently ignores the rest, so we don't filter here.
+
+    Args:
+        prev_summary: ``PosteriorSummary`` from the prior run.
+        weight: Mixture weight in ``[0, 1]`` for the previous-posterior
+            component. ``0.0`` produces priors that fully fall back to
+            defaults; ``1.0`` produces full anchoring.
+
+    Returns:
+        A dict suitable for ``ModelSpec.anchor_priors``.
+    """
+    from wanamaker.engine.summary import PosteriorSummary
+    from wanamaker.model.spec import AnchoredPrior
+
+    assert isinstance(prev_summary, PosteriorSummary)
+    return {
+        p.name: AnchoredPrior(mean=p.mean, sd=p.sd, weight=weight)
+        for p in prev_summary.parameters
+    }
+
+
+def _print_diff_summary(diff: object) -> None:
+    """Print a short user-facing summary of a refresh diff.
+
+    Lists the count of movements per ``MovementClass`` and the unexplained
+    fraction (the headline refresh-stability metric, FR-4.5).
+    """
+    from collections import Counter
+
+    from wanamaker.refresh.classify import unexplained_fraction
+    from wanamaker.refresh.diff import RefreshDiff
+
+    assert isinstance(diff, RefreshDiff)
+    typer.echo("\nRefresh diff:")
+    typer.echo(f"  {len(diff.movements)} parameter(s) compared")
+
+    counts = Counter(
+        m.movement_class.value if m.movement_class is not None else "unclassified"
+        for m in diff.movements
+    )
+    for cls, n in sorted(counts.items()):
+        typer.echo(f"    {cls}: {n}")
+
+    fraction = unexplained_fraction(list(diff.movements))
+    colour = typer.colors.GREEN if fraction < 0.1 else (
+        typer.colors.YELLOW if fraction < 0.25 else typer.colors.RED
+    )
+    typer.echo(
+        typer.style(f"  Unexplained fraction: {fraction:.1%}", fg=colour)
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover
