@@ -10,7 +10,7 @@ the local-first rules.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
@@ -26,6 +26,14 @@ from wanamaker.engine.summary import (
     PredictiveSummary,
 )
 from wanamaker.model.priors import default_priors_for_category
+
+# Naming conventions for the ``pm.Data`` containers wired into the model graph
+# at fit time. These are stable and callers (forecast, scenario comparison) use
+# them indirectly through the captured names in ``PyMCRawPosterior``.
+_CHANNEL_DATA_PREFIX = "data__channel__"
+_CONTROL_DATA_PREFIX = "data__control__"
+_TARGET_DATA_NAME = "data__target"
+_TIME_COORD_NAME = "time"
 
 RuntimeMode = Literal["quick", "standard", "full"]
 INTERVAL_MASS = 0.95
@@ -54,6 +62,18 @@ class PyMCRawPosterior:
     """ISO-8601 date strings for each fitted period, extracted from the input
     data at fit time.  Used by ``posterior_predictive`` to populate
     ``PredictiveSummary.periods`` with real dates rather than integer indices."""
+
+    control_means: dict[str, float] = field(default_factory=dict)
+    """Per-control training-data mean used to centre new-plan controls.
+
+    Forecasting on a future plan must apply the *same* centring as fit time —
+    re-centring on the future plan would let post-fit covariate drift leak
+    into the predictive draws.
+    """
+    control_stds: dict[str, float] = field(default_factory=dict)
+    """Per-control training-data standard deviation used to scale new-plan
+    controls. ``0.0`` means the control was constant in training and is left
+    uncentered for forecasting (matches the fit-time guard)."""
 
 
 RUNTIME_SETTINGS: dict[str, RuntimeSettings] = {
@@ -100,8 +120,11 @@ class PyMCEngine:
         )
         _validate_columns(model_spec, data, target_column)
 
-        pm, _, _ = _require_pymc_stack()
-        with self._build_model(pm, model_spec, data, target_column) as model:
+        pm, _, _, _ = _require_pymc_stack()
+        model, control_means, control_stds = self._build_model(
+            pm, model_spec, data, target_column
+        )
+        with model:
             idata = pm.sample(
                 draws=settings.draws,
                 tune=settings.tune,
@@ -118,6 +141,8 @@ class PyMCEngine:
             date_column=date_column,
             target_column=target_column,
             period_labels=period_labels,
+            control_means=control_means,
+            control_stds=control_stds,
         )
         summary = summarize_inference_data(idata, model_spec, data, target_column, date_column)
         diagnostics = {
@@ -139,25 +164,48 @@ class PyMCEngine:
     ) -> PredictiveSummary:
         """Draw posterior predictive samples for the fitted PyMC model.
 
-        The current implementation supports the fitted model's existing data.
-        Forward plans with new spend require the planned mutable data contract
-        in the forecast workstream.
+        ``new_data=None`` returns an in-sample predictive summary keyed by
+        the original training periods.
+
+        Passing a future-plan ``DataFrame`` swaps the model's mutable data
+        containers via ``pm.set_data`` and resamples — this is the path used
+        by ``wanamaker forecast`` and ``wanamaker compare-scenarios``.
+        Validation runs before any PyMC code is touched so the engine import
+        stays lazy when the plan is malformed.
+
+        Args:
+            posterior: A ``Posterior`` whose ``raw`` is a ``PyMCRawPosterior``
+                produced by ``self.fit``.
+            new_data: Future plan as a ``DataFrame`` with one row per future
+                period. Must contain the channels and control columns the
+                model was fit on. ``None`` requests in-sample predictive draws.
+            seed: Posterior-predictive sampling seed.
+
+        Returns:
+            ``PredictiveSummary`` over either the training periods (in-sample)
+            or the future plan periods (forecast).
+
+        Raises:
+            ValueError: If ``new_data`` is missing required columns, has
+                missing or negative spend, or is empty.
         """
         raw = _as_pymc_raw(posterior)
-        if new_data is not None:
-            raise NotImplementedError(
-                "PyMC posterior prediction for new data requires the forecast "
-                "FitContext / mutable-data contract. Existing-data posterior "
-                "predictive draws are supported."
-            )
+        if new_data is None:
+            return self._posterior_predictive_in_sample(raw, seed)
+        _validate_new_data(raw, new_data)
+        return self._posterior_predictive_forecast(raw, new_data, seed)
 
-        pm, az, _ = _require_pymc_stack()
+    def _posterior_predictive_in_sample(
+        self, raw: PyMCRawPosterior, seed: int
+    ) -> PredictiveSummary:
+        pm, az, _, _ = _require_pymc_stack()
         with raw.model:
             ppc = pm.sample_posterior_predictive(
                 raw.idata,
                 var_names=["target"],
                 random_seed=seed,
                 return_inferencedata=True,
+                progressbar=False,
             )
         target_values = ppc.posterior_predictive["target"]
         target = target_values.values.reshape(-1, target_values.shape[-1])
@@ -173,17 +221,77 @@ class PyMCEngine:
             interval_mass=INTERVAL_MASS,
         )
 
+    def _posterior_predictive_forecast(
+        self, raw: PyMCRawPosterior, new_data: pd.DataFrame, seed: int
+    ) -> PredictiveSummary:
+        pm, az, _, _ = _require_pymc_stack()
+        n_new = len(new_data)
+        channels = list(getattr(raw.model_spec, "channels", []))
+        control_columns = list(getattr(raw.model_spec, "control_columns", []))
+
+        data_updates: dict[str, NDArray[np.float64]] = {}
+        for channel in channels:
+            data_updates[f"{_CHANNEL_DATA_PREFIX}{channel.name}"] = (
+                new_data[channel.name].to_numpy(dtype=np.float64)
+            )
+        for control_column in control_columns:
+            raw_values = new_data[control_column].to_numpy(dtype=np.float64)
+            mean = raw.control_means.get(control_column, 0.0)
+            std = raw.control_stds.get(control_column, 0.0)
+            data_updates[f"{_CONTROL_DATA_PREFIX}{control_column}"] = (
+                _apply_control_centering(raw_values, mean, std)
+            )
+        # Target's observed values are not used by sample_posterior_predictive,
+        # but the dim has to match the new period count or PyMC raises.
+        data_updates[_TARGET_DATA_NAME] = np.zeros(n_new, dtype=np.float64)
+
+        coord_updates = {_TIME_COORD_NAME: np.arange(n_new, dtype=np.int64)}
+
+        with raw.model:
+            pm.set_data(data_updates, coords=coord_updates)
+            ppc = pm.sample_posterior_predictive(
+                raw.idata,
+                var_names=["target"],
+                random_seed=seed,
+                return_inferencedata=True,
+                progressbar=False,
+            )
+
+        target_values = ppc.posterior_predictive["target"]
+        target = target_values.values.reshape(-1, target_values.shape[-1])
+        mean = target.mean(axis=0)
+        hdi = _hdi_2d(target, az)
+        periods = _new_data_period_labels(raw, new_data)
+        return PredictiveSummary(
+            periods=periods,
+            mean=mean.tolist(),
+            hdi_low=hdi[:, 0].tolist(),
+            hdi_high=hdi[:, 1].tolist(),
+            interval_mass=INTERVAL_MASS,
+        )
+
     def _build_model(
         self,
         pm: Any,
         model_spec: Any,
         data: pd.DataFrame,
         target_column: str,
-    ) -> Any:
-        _, pytensor, pt = _require_pymc_stack()
-        del pytensor
+    ) -> tuple[Any, dict[str, float], dict[str, float]]:
+        """Build the PyMC model with mutable ``pm.Data`` containers.
 
-        coords = {"time": np.arange(len(data), dtype=np.int64)}
+        Wrapping channel spend, control variables, and the target observation
+        in ``pm.Data`` lets ``posterior_predictive`` later swap in a future
+        plan via ``pm.set_data`` and re-sample without rebuilding the model.
+
+        Returns:
+            ``(model, control_means, control_stds)`` — the model plus the
+            training-time centring statistics needed to apply the same
+            centring to a future plan's controls.
+        """
+        pm, _, pt, pytensor = _require_pymc_stack()
+
+        n_periods = len(data)
+        coords = {_TIME_COORD_NAME: np.arange(n_periods, dtype=np.int64)}
         channels = list(getattr(model_spec, "channels", []))
         control_columns = list(getattr(model_spec, "control_columns", []))
         lift_test_priors = dict(getattr(model_spec, "lift_test_priors", {}))
@@ -202,6 +310,20 @@ class PyMCEngine:
 
         anchor_priors = dict(getattr(model_spec, "anchor_priors", {}) or {})
 
+        # Pre-compute control centring stats from the training data. The same
+        # statistics are reused at predict time so post-fit covariate drift
+        # cannot leak into the predictive distribution.
+        control_means: dict[str, float] = {}
+        control_stds: dict[str, float] = {}
+        control_centered_arrays: dict[str, NDArray[np.float64]] = {}
+        for control_column in control_columns:
+            values = data[control_column].to_numpy(dtype=np.float64)
+            mean = float(values.mean())
+            std = float(values.std())
+            control_means[control_column] = mean
+            control_stds[control_column] = std
+            control_centered_arrays[control_column] = _apply_control_centering(values, mean, std)
+
         with pm.Model(coords=coords) as model:
             intercept = pm.Normal(
                 "intercept",
@@ -211,7 +333,12 @@ class PyMCEngine:
             mu = intercept
 
             for channel in channels:
-                spend = data[channel.name].to_numpy(dtype=np.float64)
+                spend_array = data[channel.name].to_numpy(dtype=np.float64)
+                spend_data = pm.Data(
+                    f"{_CHANNEL_DATA_PREFIX}{channel.name}",
+                    spend_array,
+                    dims=_TIME_COORD_NAME,
+                )
                 priors = default_priors_for_category(channel.category)
 
                 # --- adstock half-life ---
@@ -231,17 +358,21 @@ class PyMCEngine:
                     f"channel__{channel.name}__decay",
                     pt.power(0.5, 1.0 / half_life),
                 )
-                adstocked = _geometric_adstock_tensor(pt, spend, decay)
+                adstocked = _geometric_adstock_tensor(pytensor, pt, spend_data, decay)
 
                 # --- Hill EC50 ---
+                # The prior centre uses the training-data spend median so the
+                # prior is on the same scale as the observed channel.
+                # Forecasts use this same prior — saturation is identifiable
+                # from data, not re-derived from the future plan.
                 ap_ec50 = anchor_priors.get(f"channel.{channel.name}.ec50")
                 if ap_ec50 is not None:
                     mu_ec50, sigma_ec50 = _blend_lognormal(
-                        _log_positive_median(spend), 1.0,
+                        _log_positive_median(spend_array), 1.0,
                         ap_ec50.mean, ap_ec50.sd, ap_ec50.weight,
                     )
                 else:
-                    mu_ec50, sigma_ec50 = _log_positive_median(spend), 1.0
+                    mu_ec50, sigma_ec50 = _log_positive_median(spend_array), 1.0
                 ec50 = pm.LogNormal(
                     f"channel__{channel.name}__ec50", mu=mu_ec50, sigma=sigma_ec50,
                 )
@@ -272,28 +403,33 @@ class PyMCEngine:
                 contribution = pm.Deterministic(
                     f"contribution__{channel.name}",
                     coefficient * saturated,
-                    dims="time",
+                    dims=_TIME_COORD_NAME,
                 )
                 mu = mu + contribution
 
             for control_column in control_columns:
-                values = data[control_column].to_numpy(dtype=np.float64)
-                centered = values - values.mean()
-                scale = values.std()
-                if scale > 0:
-                    centered = centered / scale
+                control_data = pm.Data(
+                    f"{_CONTROL_DATA_PREFIX}{control_column}",
+                    control_centered_arrays[control_column],
+                    dims=_TIME_COORD_NAME,
+                )
                 beta = pm.Normal(f"control__{control_column}__coefficient", mu=0.0, sigma=1.0)
-                mu = mu + beta * centered
+                mu = mu + beta * control_data
 
             sigma = pm.HalfNormal("sigma", sigma=float(data[target_column].std() or 1.0))
+            target_data = pm.Data(
+                _TARGET_DATA_NAME,
+                data[target_column].to_numpy(dtype=np.float64),
+                dims=_TIME_COORD_NAME,
+            )
             pm.Normal(
                 "target",
                 mu=mu,
                 sigma=sigma,
-                observed=data[target_column].to_numpy(dtype=np.float64),
-                dims="time",
+                observed=target_data,
+                dims=_TIME_COORD_NAME,
             )
-        return model
+        return model, control_means, control_stds
 
 
 def runtime_settings(runtime_mode: str) -> RuntimeSettings:
@@ -319,7 +455,7 @@ def summarize_inference_data(
     date_column: str | None,
 ) -> PosteriorSummary:
     """Create a ``PosteriorSummary`` from PyMC / ArviZ inference data."""
-    _, az, _ = _require_pymc_stack()
+    _, az, _, _ = _require_pymc_stack()
     posterior = idata.posterior
     az_summary = az.summary(idata, hdi_prob=INTERVAL_MASS)
 
@@ -357,17 +493,18 @@ def summarize_inference_data(
     )
 
 
-def _require_pymc_stack() -> tuple[Any, Any, Any]:
+def _require_pymc_stack() -> tuple[Any, Any, Any, Any]:
     try:
         import arviz as az
         import pymc as pm
+        import pytensor
         import pytensor.tensor as pt
     except ImportError as exc:  # pragma: no cover - depends on environment
         raise RuntimeError(
             "PyMC backend requires pymc, arviz, and pytensor. "
             "Install Wanamaker with its production dependencies."
         ) from exc
-    return pm, az, pt
+    return pm, az, pt, pytensor
 
 
 def _target_column(model_spec: Any, data: pd.DataFrame) -> str:
@@ -396,14 +533,76 @@ def _as_pymc_raw(posterior: Posterior) -> PyMCRawPosterior:
     return raw
 
 
-def _geometric_adstock_tensor(pt: Any, spend: NDArray[np.float64], decay: Any) -> Any:
-    values = pt.as_tensor_variable(spend.astype(np.float64))
-    outputs = []
-    previous = pt.as_tensor_variable(0.0)
-    for index in range(len(spend)):
-        previous = values[index] + decay * previous
-        outputs.append(previous)
-    return pt.stack(outputs)
+def _validate_new_data(raw: PyMCRawPosterior, new_data: pd.DataFrame) -> None:
+    """Reject a future plan that does not match the fitted model's contract.
+
+    Validation runs *before* any PyMC code is touched so the lazy-import
+    contract is preserved when a caller hands in a malformed plan.
+    """
+    if len(new_data) == 0:
+        raise ValueError("new_data is empty; expected at least one future period")
+
+    channels = list(getattr(raw.model_spec, "channels", []))
+    control_columns = list(getattr(raw.model_spec, "control_columns", []))
+    required = [channel.name for channel in channels] + list(control_columns)
+    missing = [column for column in required if column not in new_data.columns]
+    if missing:
+        raise ValueError(
+            f"new_data is missing columns required by the fitted ModelSpec: {missing}"
+        )
+    for column in required:
+        if new_data[column].isna().any():
+            raise ValueError(f"new_data has missing values in column {column!r}")
+    for channel in channels:
+        if (new_data[channel.name] < 0).any():
+            raise ValueError(
+                f"new_data has negative spend for channel {channel.name!r}; "
+                "spend must be non-negative."
+            )
+
+
+def _apply_control_centering(
+    values: NDArray[np.float64], mean: float, std: float
+) -> NDArray[np.float64]:
+    """Centre and scale a control column using fit-time training statistics."""
+    centered = values - mean
+    if std > 0:
+        centered = centered / std
+    return centered
+
+
+def _new_data_period_labels(raw: PyMCRawPosterior, new_data: pd.DataFrame) -> list[str]:
+    """Period labels for forecast output.
+
+    Prefers the model's date column from the future plan; falls back to
+    integer indices when the plan does not carry one (e.g. an in-memory
+    DataFrame the caller built without dates).
+    """
+    if raw.date_column and raw.date_column in new_data.columns:
+        return new_data[raw.date_column].astype(str).tolist()
+    return [str(i) for i in range(len(new_data))]
+
+
+def _geometric_adstock_tensor(pytensor: Any, pt: Any, spend: Any, decay: Any) -> Any:
+    """Geometric adstock as a ``pytensor.scan`` over the spend tensor.
+
+    Using a scan instead of a Python-unrolled loop lets the model accept
+    variable-length data via ``pm.Data`` containers — the scan iterates over
+    whatever length the spend tensor actually has at evaluate time, which is
+    what makes future-plan posterior predictive draws possible.
+
+    For each step the recurrence is ``s_t = x_t + decay * s_{t-1}`` with
+    ``s_{-1} = 0``, identical to the previous unrolled implementation.
+    """
+    spend_tensor = pt.as_tensor_variable(spend, dtype="float64")
+    initial = pt.zeros((), dtype="float64")
+    result, _ = pytensor.scan(
+        fn=lambda x_t, prev: x_t + decay * prev,
+        sequences=[spend_tensor],
+        outputs_info=[initial],
+        strict=True,
+    )
+    return result
 
 
 def _hill_saturation_tensor(pt: Any, spend: Any, ec50: Any, slope: Any) -> Any:

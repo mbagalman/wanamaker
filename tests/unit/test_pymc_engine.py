@@ -10,10 +10,18 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from wanamaker.engine.pymc import PyMCEngine, RuntimeSettings, runtime_settings
+from wanamaker.engine.base import Posterior
+from wanamaker.engine.pymc import (
+    PyMCEngine,
+    PyMCRawPosterior,
+    RuntimeSettings,
+    _apply_control_centering,
+    runtime_settings,
+)
 from wanamaker.model.spec import ChannelSpec, ModelSpec
 
 
@@ -79,3 +87,110 @@ def test_fit_validates_required_columns_before_importing_pymc() -> None:
         engine.fit(model_spec, data, seed=1, runtime_mode="quick")
 
     assert "pymc" not in sys.modules
+
+
+# ---------------------------------------------------------------------------
+# Control centering helper (pure-numpy, no engine needed)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyControlCentering:
+    def test_zero_centered_unit_scaled_when_std_positive(self) -> None:
+        values = np.array([1.0, 2.0, 3.0, 4.0])
+        out = _apply_control_centering(values, mean=2.5, std=1.0)
+        assert out.tolist() == pytest.approx([-1.5, -0.5, 0.5, 1.5])
+
+    def test_only_centered_when_std_is_zero(self) -> None:
+        values = np.array([1.0, 1.0, 1.0])
+        out = _apply_control_centering(values, mean=1.0, std=0.0)
+        assert out.tolist() == pytest.approx([0.0, 0.0, 0.0])
+
+    def test_does_not_mutate_input(self) -> None:
+        values = np.array([1.0, 2.0, 3.0])
+        original = values.copy()
+        _apply_control_centering(values, mean=2.0, std=1.0)
+        assert (values == original).all()
+
+
+# ---------------------------------------------------------------------------
+# posterior_predictive(new_data=...) validation — runs *before* PyMC import
+# ---------------------------------------------------------------------------
+
+
+def _stub_raw(*, channels: list[str], controls: list[str]) -> PyMCRawPosterior:
+    """Construct a PyMCRawPosterior with no real PyMC objects.
+
+    The validation path runs before any engine code, so a stub with the
+    minimum surface needed by ``_validate_new_data`` is enough to exercise
+    every error message.
+    """
+    model_spec = SimpleNamespace(
+        target_column="revenue",
+        channels=[ChannelSpec(name=name, category="paid_search") for name in channels],
+        control_columns=list(controls),
+    )
+    return PyMCRawPosterior(
+        idata=None,
+        model=None,
+        model_spec=model_spec,
+        date_column=None,
+        target_column="revenue",
+    )
+
+
+class TestPosteriorPredictiveNewDataValidation:
+    def test_missing_channel_column_raises(self) -> None:
+        raw = _stub_raw(channels=["paid_search", "tv"], controls=[])
+        new_data = pd.DataFrame({"paid_search": [1.0, 2.0]})  # tv missing
+
+        with pytest.raises(ValueError, match="missing columns"):
+            PyMCEngine().posterior_predictive(Posterior(raw=raw), new_data, seed=0)
+
+        assert "pymc" not in sys.modules
+
+    def test_missing_control_column_raises(self) -> None:
+        raw = _stub_raw(channels=["paid_search"], controls=["promo"])
+        new_data = pd.DataFrame({"paid_search": [1.0, 2.0]})  # promo missing
+
+        with pytest.raises(ValueError, match="missing columns.*promo"):
+            PyMCEngine().posterior_predictive(Posterior(raw=raw), new_data, seed=0)
+
+        assert "pymc" not in sys.modules
+
+    def test_negative_spend_raises(self) -> None:
+        raw = _stub_raw(channels=["paid_search"], controls=[])
+        new_data = pd.DataFrame({"paid_search": [1.0, -2.0, 3.0]})
+
+        with pytest.raises(ValueError, match="negative spend.*paid_search"):
+            PyMCEngine().posterior_predictive(Posterior(raw=raw), new_data, seed=0)
+
+        assert "pymc" not in sys.modules
+
+    def test_nan_in_required_column_raises(self) -> None:
+        raw = _stub_raw(channels=["paid_search"], controls=["promo"])
+        new_data = pd.DataFrame(
+            {"paid_search": [1.0, 2.0, 3.0], "promo": [0.0, float("nan"), 0.0]}
+        )
+
+        with pytest.raises(ValueError, match="missing values.*promo"):
+            PyMCEngine().posterior_predictive(Posterior(raw=raw), new_data, seed=0)
+
+        assert "pymc" not in sys.modules
+
+    def test_empty_dataframe_raises(self) -> None:
+        raw = _stub_raw(channels=["paid_search"], controls=[])
+        new_data = pd.DataFrame({"paid_search": []})
+
+        with pytest.raises(ValueError, match="empty"):
+            PyMCEngine().posterior_predictive(Posterior(raw=raw), new_data, seed=0)
+
+        assert "pymc" not in sys.modules
+
+    def test_non_pymc_raw_posterior_raises_type_error(self) -> None:
+        bogus = Posterior(raw=object())
+        new_data = pd.DataFrame({"paid_search": [1.0, 2.0]})
+
+        with pytest.raises(TypeError, match="PyMCRawPosterior"):
+            PyMCEngine().posterior_predictive(bogus, new_data, seed=0)
+
+        assert "pymc" not in sys.modules
