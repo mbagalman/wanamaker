@@ -12,3 +12,17 @@ v1 deliberately ships scenario comparison rather than constrained inverse
 optimization (deferred to v1.1, BRD/PRD §4.2). User-driven scenarios keep
 the human in control of strategic decisions.
 """
+
+from wanamaker.forecast.posterior_predictive import (
+    ExtrapolationFlag,
+    ForecastResult,
+    PosteriorPredictiveEngine,
+    forecast,
+)
+
+__all__ = [
+    "ExtrapolationFlag",
+    "ForecastResult",
+    "PosteriorPredictiveEngine",
+    "forecast",
+]
