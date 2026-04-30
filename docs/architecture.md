@@ -2,7 +2,7 @@
 
 **Audience:** Developers and AI coding assistants working on the codebase.
 **Companion documents:** [`docs/wanamaker_brd_prd.md`](wanamaker_brd_prd.md) (what and why), [`AGENTS.md`](https://github.com/mbagalman/wanamaker/blob/main/AGENTS.md) (hard rules and coding conventions).
-**Status:** Phase -1 / early Phase 0. PyMC has been selected as the Bayesian engine; most modules are scaffolded but not yet implemented.
+**Status:** Phase 0 / entering Phase 1. PyMC backend implemented and tested; core transforms, model spec, config, artifacts, diagnose, and refresh diff are all fully implemented. Active work is on forecast, trust card, reports, and remaining CLI commands.
 
 ---
 
@@ -118,14 +118,18 @@ Owns the `.wanamaker/` directory layout. Every model fit writes a versioned run 
 .wanamaker/
 +-- runs/
     +-- <run_id>/
-        +-- manifest.json     run_fingerprint, seed, engine, schema version, skip_validation flag
-        +-- config.yaml       snapshot of the run config
-        +-- data_hash.txt     SHA-256 of the input CSV
-        +-- posterior.nc      posterior draws (engine-native format, e.g. NetCDF via ArviZ)
-        +-- summary.json      PosteriorSummary serialised for refresh diffs and reports
-        +-- timestamp.txt     ISO-8601 UTC fit timestamp
-        +-- engine.txt        engine name + version
+        +-- manifest.json       run_fingerprint, seed, engine, schema versions, skip_validation flag
+        +-- config.yaml         snapshot of the run config
+        +-- data_hash.txt       SHA-256 of the input CSV
+        +-- posterior.nc        posterior draws (engine-native format, e.g. NetCDF via ArviZ)
+        +-- summary.json        PosteriorSummary (versioned envelope)
+        +-- trust_card.json     TrustCard (versioned envelope; persisted for auditability)
+        +-- refresh_diff.json   RefreshDiff vs. prior run (present only on refresh; versioned envelope)
+        +-- timestamp.txt       ISO-8601 UTC fit timestamp
+        +-- engine.txt          engine name + version
 ```
+
+**Versioned artifact envelopes:** Every JSON artifact (`summary.json`, `trust_card.json`, `refresh_diff.json`) uses the envelope format `{"schema_version": N, "payload": {...}}`. Schema version constants (`SUMMARY_SCHEMA_VERSION`, `TRUST_CARD_SCHEMA_VERSION`, `REFRESH_DIFF_SCHEMA_VERSION`, `MANIFEST_SCHEMA_VERSION`) live in `artifacts.py`. The deserializers (`deserialize_summary`, `deserialize_trust_card`, `deserialize_refresh_diff`, `load_manifest`) validate the version before parsing and raise `ValueError` with a clear message on mismatch. Bump the constant and update the deserializer when a format change is backward-incompatible.
 
 **Two identity concepts:**
 
@@ -181,7 +185,7 @@ Implements `wanamaker diagnose` (FR-2). Runs before fitting; cannot be silently 
 
 The most important architectural boundary in the codebase. All feature code must import from `wanamaker.engine`, never from `pymc`, `numpyro`, or `cmdstanpy` directly.
 
-**Current state:** Protocol and typed summaries defined; PyMC selected; concrete backend not yet implemented. See `docs/decisions/0001-bayesian-engine-selection.md`.
+**Current state:** Protocol, typed summaries, and PyMC backend all implemented. See `docs/decisions/0001-bayesian-engine-selection.md` for the engine selection rationale.
 
 | File | Responsibility |
 |---|---|
@@ -229,9 +233,9 @@ These modules own the **canonical mathematical formulas** for adstock and satura
 
 | File | Function | Status |
 |---|---|---|
-| `adstock.py` | `geometric_adstock(spend, decay)` | Scaffolded |
-| `adstock.py` | `weibull_adstock(spend, shape, scale)` | Scaffolded |
-| `saturation.py` | `hill_saturation(spend, ec50, slope)` | Scaffolded |
+| `adstock.py` | `geometric_adstock(spend, decay)` | **Implemented** |
+| `adstock.py` | `weibull_adstock(spend, shape, scale)` | **Implemented** |
+| `saturation.py` | `hill_saturation(spend, ec50, slope)` | **Implemented** |
 
 **Geometric adstock:** `A_t = X_t + decay * A_{t-1}`, `A_{-1} = 0`. Decay in [0, 1). Reference: Hanssens, Parsons & Schultz, *Market Response Models* (2nd ed., 2001), ch. 10.
 
@@ -250,9 +254,7 @@ Produces a `ModelSpec` -- a pure data description of the model that any backend 
 | `spec.py` | `ChannelSpec` (name, category, adstock_family) and `ModelSpec` (channels list, control_columns). Frozen dataclasses. |
 | `priors.py` | `default_priors_for_category(category)` -- returns prior shapes keyed by category. To be populated in Phase 0 with PRD-cited values. |
 
-**Planned `ModelSpec` schema** (fields to be added as phases land):
-
-The current scaffold only has channel names, categories, and adstock family. The intended full shape before the engine spike is:
+**`ModelSpec` schema** (all fields implemented):
 
 | Field | Purpose |
 |---|---|
@@ -273,6 +275,8 @@ This schema should be designed before the backend spike so the first backend imp
 
 **Separation of concerns:** `ModelSpec` is data; the engine translates it into a concrete probabilistic program. This means the same model description can be rendered by any backend without leakage.
 
+`build_model_spec(config)` in `model/builder.py` translates a `WanamakerConfig` into a `ModelSpec`, resolving channel priors from the taxonomy defaults. This is the function `cli.py` calls before handing off to the engine.
+
 ### 3.10 `refresh/` -- Refresh Accountability (Headline Feature)
 
 Three components implementing FR-4:
@@ -280,8 +284,8 @@ Three components implementing FR-4:
 | File | Responsibility |
 |---|---|
 | `anchor.py` | Posterior anchoring as a mixture prior. `ANCHOR_PRESETS` dict, `resolve_anchor_weight(value)`. |
-| `diff.py` | `ParameterMovement`, `RefreshDiff` dataclasses; `compute_diff(previous_summary, current_summary) -> RefreshDiff`. Both arguments are `PosteriorSummary` objects from `engine/summary.py`. |
-| `classify.py` | `MovementClass` enum with 5 values. |
+| `diff.py` | `ParameterMovement` (with `movement_class`), `RefreshDiff` dataclasses; `compute_diff(previous_summary, current_summary, prev_run_id, curr_run_id) -> RefreshDiff`. Both summary arguments are `PosteriorSummary` from `engine/summary.py`. Diffs both scalar parameters and channel contributions (named `channel.<name>.contribution`). |
+| `classify.py` | `MovementClass` enum; `classify_movement(prev_hdi, curr_mean, curr_hdi)` — priority order: WEAKLY_IDENTIFIED → WITHIN_PRIOR_CI → UNEXPLAINED; `unexplained_fraction(movements)` — headline refresh stability metric. |
 
 **Anchoring math (FR-4.4):**
 ```
@@ -317,7 +321,9 @@ The fraction classified as `unexplained` is the headline Trust Card refresh stab
 | `posterior_predictive.py` | `forecast(posterior, future_spend, seed)` -- forward simulation given a budget plan. Returns `PredictiveSummary`. |
 | `scenarios.py` | `compare_scenarios(posterior, plans, seed)` -- ranks 2-3 user-supplied plans with uncertainty. Flags extrapolation beyond historical observed spend. |
 
-v1 ships scenario comparison (user-driven). Constrained inverse optimization ("how do I hit X?") is deferred to v1.1. Spend-invariant channels are excluded from reallocation recommendations (FR-3.2).
+All forecast and scenario logic must consume `PosteriorSummary` (not a bare `Posterior`). `ChannelContributionSummary.observed_spend_min` and `observed_spend_max` provide the historical spend range needed to detect extrapolation. `spend_invariant=True` channels are excluded from reallocation recommendations (FR-3.2).
+
+v1 ships scenario comparison (user-driven). Constrained inverse optimization ("how do I hit X?") is deferred to v1.1.
 
 ### 3.12 `trust_card/` -- Credibility Assessment
 
@@ -358,10 +364,12 @@ v1.1 will add experiment design (geo holdout vs. budget split, sample size, dura
 
 ### 3.15 `benchmarks/` -- Benchmark Dataset Loaders
 
-Loaders for the eight named benchmark datasets (NFR-7). The datasets themselves live in `benchmark_data/` at the repo root. Two artifact types are needed:
+Loaders for the eight named benchmark datasets (NFR-7). The datasets live in `benchmark_data/` at the repo root. Two artifact types:
 
-1. **Committed CSVs** -- anonymized, versioned in the repo, loaded by these functions.
-2. **Generation scripts** -- reproducible synthetic data generators (to be added alongside the loaders in Phase 0) so the benchmark data can be regenerated if the schema changes.
+1. **Committed CSVs + ground-truth JSON** — versioned in the repo, loaded by these functions.
+2. **Generation scripts** — `benchmark_data/generate_synthetic_ground_truth.py` is the canonical example; regenerate with `python benchmark_data/generate_synthetic_ground_truth.py` from the repo root.
+
+The synthetic ground-truth dataset (12 channels, 150 weeks) is committed and ready. `load_synthetic_ground_truth()` returns `(DataFrame, ground_truth_dict)` where the dict carries `date_column`, `target_column`, `spend_columns`, per-channel parameters, and `top_3_channels`.
 
 | Dataset | Used to validate |
 |---|---|
@@ -513,29 +521,31 @@ All outputs go to `.wanamaker/` in the project directory (FR-Privacy.2). Nothing
 
 | Module | Status | Phase |
 |---|---|---|
-| `cli.py` | Scaffolded -- all 6 commands raise `NotImplementedError` | Commands wired up across Phase 0-2 |
+| `cli.py` | **Implemented** -- `diagnose` and `fit` wired up; `report`, `forecast`, `compare-scenarios`, `refresh` stub | Phase 1-2 |
 | `config.py` | **Implemented** -- full pydantic schema | Done |
 | `seeding.py` | **Implemented** -- `make_rng` and `derive_seed` | Done |
-| `artifacts.py` | **Implemented** -- directory layout, fingerprint/run_id separation, `list_runs` | Done |
+| `artifacts.py` | **Implemented** -- directory layout, fingerprint/run_id, versioned envelopes for all JSON artifacts, `list_runs`, `load_manifest` | Done |
 | `data/io.py` | **Partial** -- `load_input_csv` works; `load_lift_test_csv` stubbed | Phase 1 |
-| `data/taxonomy.py` | **Implemented** -- channel category names | Priors added Phase 0 |
+| `data/taxonomy.py` | **Implemented** -- channel category names | Done |
 | `diagnose/readiness.py` | **Implemented** -- all data structures | Done |
-| `diagnose/checks.py` | Scaffolded -- 3 check functions stubbed | Phase 1 |
-| `engine/base.py` | **Implemented** -- Protocol, `Posterior`, `FitResult` | Backends: Phase 0 |
+| `diagnose/checks.py` | **Implemented** -- all 9 checks including structural breaks, collinearity, spend variation, target leakage | Done |
+| `engine/base.py` | **Implemented** -- Protocol, `Posterior`, `FitResult` | Done |
 | `engine/summary.py` | **Implemented** -- all typed summary types | Done |
-| `transforms/adstock.py` | Scaffolded -- both functions stubbed | Phase 0 |
-| `transforms/saturation.py` | Scaffolded -- Hill function stubbed | Phase 0 |
+| `engine/pymc.py` | **Implemented** -- full PyMC backend; HDI, data-adaptive priors, period labels, convergence | Done |
+| `transforms/adstock.py` | **Implemented** -- `geometric_adstock` (validated), `weibull_adstock`, `half_life_to_decay` | Done |
+| `transforms/saturation.py` | **Implemented** -- `hill_saturation` (validated, log-space stable) | Done |
 | `model/spec.py` | **Implemented** -- full schema: `ChannelSpec`, `LiftPrior`, `HoldoutConfig`, `SeasonalitySpec`, `AnchoredPrior`, `ModelSpec` | Done |
 | `model/priors.py` | **Implemented** -- `ChannelPriors`, `default_priors_for_category` for all 10 categories | Done |
+| `model/builder.py` | **Implemented** -- `build_model_spec(config)` translates `WanamakerConfig` → `ModelSpec` | Done |
 | `refresh/anchor.py` | **Implemented** -- presets, `resolve_anchor_weight` | Done |
-| `refresh/classify.py` | **Implemented** -- `MovementClass` enum | Done |
-| `refresh/diff.py` | Scaffolded -- data structures defined; `compute_diff` stubbed | Phase 1 |
+| `refresh/classify.py` | **Implemented** -- `MovementClass` enum, `classify_movement`, `unexplained_fraction` | Done |
+| `refresh/diff.py` | **Implemented** -- `ParameterMovement` (with `movement_class`), `RefreshDiff`, `compute_diff` | Done |
 | `forecast/posterior_predictive.py` | Stubbed | Phase 1 |
 | `forecast/scenarios.py` | Stubbed | Phase 1 |
-| `trust_card/card.py` | **Implemented** -- all data structures | Done |
+| `trust_card/card.py` | **Implemented** -- `TrustStatus`, `TrustDimension`, `TrustCard` frozen dataclasses | Done |
 | `advisor/channel_flagging.py` | Scaffolded -- `ChannelFlag` defined; `flag_channels` stubbed | Phase 2 |
 | `reports/render.py` | **Implemented** -- Jinja2 environment wired; template shells | Templates: Phase 2 |
-| `benchmarks/loaders.py` | Stubbed | Phase 0-1 |
+| `benchmarks/loaders.py` | **Implemented** -- `load_synthetic_ground_truth()` returns `(DataFrame, dict)` | Done |
 | `_xgboost_aux/` | Empty | Phase 1 |
 
 ---
@@ -549,7 +559,7 @@ These are not guidelines -- violating them means rebuilding the project's credib
 | No HTTP / telemetry in core code paths | CI test `test_no_network_in_core.py` (import-time); planned network-isolated integration tests (Phase 2) |
 | No LLM calls for output generation | Code review + no LLM SDK in dependencies |
 | No xgboost for ROI / saturation / adstock | AGENTS.md Hard Rule 3; `_xgboost_aux` module isolation |
-| Bit-for-bit reproducibility given same seed | NFR-2; planned CI test running same fit twice (Phase 0) |
+| Numerically close reproducibility given same seed (RTOL=1e-6) | NFR-2; `tests/test_reproducibility.py` (enabled with `WANAMAKER_RUN_ENGINE_TESTS=1`) |
 | Transforms have unit tests against known outputs | AGENTS.md Hard Rule 4; test coverage requirement |
 | Engine abstraction is not bypassed | No direct `pymc`/`numpyro` imports in feature code |
 | Downstream modules consume `PosteriorSummary`, not `Posterior.raw` | Code review; `Posterior.raw` typed as `Any` to discourage casual use |
@@ -594,7 +604,7 @@ These are not guidelines -- violating them means rebuilding the project's credib
 
 **CI gates:**
 - `test_no_network_in_core.py` -- runs on every PR; walks core import graph at import time (fast guardrail)
-- Reproducibility test (planned Phase 0) -- runs same fit twice, compares posteriors bit-for-bit
+- `tests/test_reproducibility.py` -- enabled with `WANAMAKER_RUN_ENGINE_TESTS=1`; fits same benchmark twice with same seed, compares all summary floats within RTOL=1e-6 (numerically close, not necessarily bit-for-bit identical across platforms)
 - Network-isolated integration test (planned Phase 2) -- runs each of the 6 core commands in a container without network access and compares output
 - Cross-platform install test (planned Phase 2) -- clean-environment pip install on Linux, macOS (Intel + ARM), Windows
 
@@ -604,11 +614,11 @@ These are not guidelines -- violating them means rebuilding the project's credib
 
 | Decision | Options | Resolution path |
 |---|---|---|
-| **Default anchoring weight** | Currently 0.3 (placeholder) | Phase 1: calibration against refresh stability benchmark |
+| **Default anchoring weight** | Currently 0.3 (placeholder) | Phase 1: calibration against refresh stability benchmark (#18) |
 | **Primary recommended install path** | pip vs. Docker | Validate PyMC install in cross-platform CI; pip remains the target path unless CI proves otherwise |
 | **Interactive charts** | matplotlib/seaborn (static) vs. plotly (interactive HTML) | Phase 2: user testing feedback |
-| **ModelSpec full schema** | Planned fields in Section 3.9 | Phase 0: before backend spike hardens around an accidental minimum |
+| **Cross-platform reproducibility** | Resolved: numerically close (RTOL=1e-6), not bit-for-bit identical | Documented in `tests/test_reproducibility.py` |
 
 ---
 
-*Last updated: 2026-04-29. Update this document when module responsibilities change, interfaces are finalized, or the engine decision lands.*
+*Last updated: 2026-04-29. Update this document when module responsibilities change, interfaces are finalized, or key decisions land.*
