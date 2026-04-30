@@ -185,6 +185,7 @@ class PyMCEngine:
         coords = {"time": np.arange(len(data), dtype=np.int64)}
         channels = list(getattr(model_spec, "channels", []))
         control_columns = list(getattr(model_spec, "control_columns", []))
+        lift_test_priors = dict(getattr(model_spec, "lift_test_priors", {}))
 
         # Data-adaptive scale for priors whose natural magnitude is proportional
         # to the target.  Using 2 × std for the intercept gives a weakly
@@ -230,9 +231,11 @@ class PyMCEngine:
                     sigma=priors.hill_alpha_sigma,
                 )
                 saturated = _hill_saturation_tensor(pt, adstocked, ec50, slope)
-                coefficient = pm.HalfNormal(
-                    f"channel__{channel.name}__coefficient",
-                    sigma=target_std,
+                coefficient = _coefficient_prior(
+                    pm=pm,
+                    name=f"channel__{channel.name}__coefficient",
+                    lift_prior=lift_test_priors.get(channel.name),
+                    default_sigma=target_std,
                 )
                 contribution = pm.Deterministic(
                     f"contribution__{channel.name}",
@@ -376,6 +379,19 @@ def _hill_saturation_tensor(pt: Any, spend: Any, ec50: Any, slope: Any) -> Any:
     numerator = pt.power(positive_spend, slope)
     denominator = numerator + pt.power(ec50, slope) + 1e-12
     return numerator / denominator
+
+
+def _coefficient_prior(pm: Any, name: str, lift_prior: Any | None, default_sigma: float) -> Any:
+    """Return the channel coefficient prior, optionally calibrated by lift tests."""
+    if lift_prior is None:
+        return pm.HalfNormal(name, sigma=default_sigma)
+
+    return pm.TruncatedNormal(
+        name,
+        mu=float(lift_prior.mean_roi),
+        sigma=float(lift_prior.sd_roi),
+        lower=0.0,
+    )
 
 
 def _log_positive_median(values: NDArray[np.float64]) -> float:

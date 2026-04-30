@@ -12,6 +12,15 @@ import pandas as pd
 
 from wanamaker.config import DataConfig
 
+LIFT_TEST_REQUIRED_COLUMNS = {
+    "channel",
+    "test_start",
+    "test_end",
+    "lift_estimate",
+    "ci_lower",
+    "ci_upper",
+}
+
 
 def load_input_csv(config: DataConfig) -> pd.DataFrame:
     """Load the input CSV described by ``config``.
@@ -46,5 +55,61 @@ def load_lift_test_csv(path: Path) -> pd.DataFrame:
 
     Required columns: channel, test_start, test_end, lift_estimate,
     ci_lower, ci_upper.
+
+    The returned frame preserves the required column names, parses test dates,
+    converts numeric lift fields to floats, and rejects ambiguous duplicate
+    channel rows. Conversion from confidence intervals to ``LiftPrior`` objects
+    is handled by ``wanamaker.model.builder``.
+
+    Args:
+        path: Path to the lift-test CSV.
+
+    Returns:
+        Validated lift-test results, one row per channel.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        ValueError: If required columns are missing, dates/numbers cannot be
+            parsed, intervals are invalid, or a channel appears more than once.
     """
-    raise NotImplementedError("Phase 1: lift-test calibration loader")
+    df = pd.read_csv(path)
+    missing = LIFT_TEST_REQUIRED_COLUMNS - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"lift-test CSV {path} is missing required columns: {sorted(missing)}"
+        )
+
+    out = df[
+        ["channel", "test_start", "test_end", "lift_estimate", "ci_lower", "ci_upper"]
+    ].copy()
+    out["channel"] = out["channel"].astype(str).str.strip()
+    if bool((out["channel"] == "").any()):
+        raise ValueError(f"lift-test CSV {path} contains blank channel names")
+
+    duplicates = sorted(out.loc[out["channel"].duplicated(), "channel"].unique())
+    if duplicates:
+        raise ValueError(
+            f"lift-test CSV {path} contains duplicate channel rows: {duplicates}"
+        )
+
+    for column in ("test_start", "test_end"):
+        out[column] = pd.to_datetime(out[column], errors="raise")
+
+    bad_date_order = out["test_end"] < out["test_start"]
+    if bool(bad_date_order.any()):
+        channels = sorted(out.loc[bad_date_order, "channel"].tolist())
+        raise ValueError(
+            f"lift-test CSV {path} has test_end before test_start for channels: {channels}"
+        )
+
+    for column in ("lift_estimate", "ci_lower", "ci_upper"):
+        out[column] = pd.to_numeric(out[column], errors="raise")
+
+    bad_intervals = out["ci_upper"] <= out["ci_lower"]
+    if bool(bad_intervals.any()):
+        channels = sorted(out.loc[bad_intervals, "channel"].tolist())
+        raise ValueError(
+            f"lift-test CSV {path} has ci_upper <= ci_lower for channels: {channels}"
+        )
+
+    return out
