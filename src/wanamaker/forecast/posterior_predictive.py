@@ -71,7 +71,11 @@ class ForecastResult(PredictiveSummary):
 
 
 @dataclass(frozen=True)
-class _ForecastPlan:
+class ForecastPlan:
+    """A normalised future spend plan: ordered period labels plus a wide
+    period-by-channel frame (``period`` column followed by one column per
+    required channel)."""
+
     periods: list[str]
     data: pd.DataFrame
 
@@ -116,7 +120,7 @@ def forecast(
 
     channel_ranges = _channel_ranges(posterior_summary)
     channels = list(channel_ranges)
-    plan = _load_plan(future_spend, channels)
+    plan = load_plan(future_spend, channels)
     flags = _extrapolation_flags(plan, channel_ranges)
     spend_invariant_channels = [
         c.channel for c in posterior_summary.channel_contributions if c.spend_invariant
@@ -151,10 +155,24 @@ def _channel_ranges(
     return ranges
 
 
-def _load_plan(
+def load_plan(
     future_spend: str | Path | pd.DataFrame,
     required_channels: list[str],
-) -> _ForecastPlan:
+) -> ForecastPlan:
+    """Load and normalise a future spend plan into a wide period-channel frame.
+
+    Accepts wide (``period,<ch1>,<ch2>,...``), long (``period,channel,spend``),
+    or transposed (``channel,<p1>,<p2>,...``) shapes. Returns a ``ForecastPlan``
+    whose ``data`` is always wide-format with a single ``period`` column.
+
+    Used by ``forecast()`` and ``compare_scenarios()`` so both consume the
+    same normalised plan and produce consistent spend totals.
+
+    Raises:
+        TypeError: If ``future_spend`` is not a CSV path or DataFrame.
+        ValueError: If the plan is empty, missing required channels, has
+            duplicates, or contains non-numeric / negative spend.
+    """
     if isinstance(future_spend, (str, Path)):
         raw = pd.read_csv(future_spend)
     elif isinstance(future_spend, pd.DataFrame):
@@ -193,7 +211,7 @@ def _load_plan(
         if (data[channel] < 0).any():
             raise ValueError(f"future spend plan contains negative spend for {channel!r}")
 
-    return _ForecastPlan(periods=periods, data=data[["period", *required_channels]])
+    return ForecastPlan(periods=periods, data=data[["period", *required_channels]])
 
 
 def _is_long_plan(data: pd.DataFrame) -> bool:
@@ -269,7 +287,7 @@ def _validate_channels(
 
 
 def _extrapolation_flags(
-    plan: _ForecastPlan,
+    plan: ForecastPlan,
     channel_ranges: dict[str, ChannelContributionSummary],
 ) -> list[ExtrapolationFlag]:
     flags: list[ExtrapolationFlag] = []
