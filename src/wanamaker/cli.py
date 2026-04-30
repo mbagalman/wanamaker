@@ -693,11 +693,17 @@ def _analytical_config_hash(cfg: object, hash_config_fn: object) -> str:
 
 
 def _get_pymc_version() -> str:
-    """Return the installed PyMC version string, or 'unknown' if not available."""
+    """Return the installed PyMC version string, or 'unknown' if not available.
+
+    Uses ``importlib.metadata`` so the engine version can be read without
+    actually importing PyMC (which would pull in arviz / pytensor and
+    violate the lazy-import contract that ``test_pymc_engine`` relies on).
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
     try:
-        import pymc
-        return str(pymc.__version__)
-    except ImportError:
+        return version("pymc")
+    except PackageNotFoundError:
         return "unknown"
 
 
