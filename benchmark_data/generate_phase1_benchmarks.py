@@ -81,15 +81,13 @@ def main() -> None:
     public_df.to_csv(output_dir / "public_example.csv", index=False)
     _write_json(output_dir / "public_example_metadata.json", public_meta)
 
-    refresh_base, refresh_meta = _make_dataset(
-        dataset_name="refresh_stability",
-        channels=REFRESH_CHANNELS,
-        n_weeks=128,
-        start_date="2023-01-02",
-        seed=REFRESH_SEED,
-        stable=True,
-    )
-    refresh_extended, refresh_extended_meta = _make_dataset(
+    # Generate the 132-week extended dataset, then slice the first 128 weeks
+    # for the base. This way the base is *literally* the prefix of the extended
+    # dataset — so a refresh that fits on the extended sees exactly the same
+    # historical observations the original run did, plus four genuinely new
+    # weeks. Independent regeneration would mix Monte-Carlo noise into the
+    # historical window and corrupt the NFR-5 movement-classification benchmark.
+    refresh_extended, refresh_meta = _make_dataset(
         dataset_name="refresh_stability",
         channels=REFRESH_CHANNELS,
         n_weeks=132,
@@ -97,10 +95,15 @@ def main() -> None:
         seed=REFRESH_SEED,
         stable=True,
     )
-    refresh_base.to_csv(output_dir / "refresh_stability_base.csv", index=False)
+    refresh_base = refresh_extended.iloc[:128].reset_index(drop=True)
+
     refresh_extended.to_csv(output_dir / "refresh_stability_4_weeks_added.csv", index=False)
-    refresh_meta["extended_n_weeks"] = refresh_extended_meta["n_weeks"]
-    refresh_meta["extended_total_revenue"] = refresh_extended_meta["total_revenue"]
+    refresh_base.to_csv(output_dir / "refresh_stability_base.csv", index=False)
+
+    refresh_meta["extended_n_weeks"] = refresh_meta["n_weeks"]
+    refresh_meta["extended_total_revenue"] = refresh_meta["total_revenue"]
+    refresh_meta["n_weeks"] = len(refresh_base)
+    refresh_meta["total_revenue"] = round(float(refresh_base[TARGET_COLUMN].sum()), 6)
     refresh_meta["acceptance_target"] = {
         "default_anchor_weight": 0.3,
         "minimum_non_unexplained_fraction": 0.9,

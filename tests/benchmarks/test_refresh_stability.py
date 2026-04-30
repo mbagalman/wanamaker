@@ -18,14 +18,8 @@ Marked ``engine`` — skipped automatically in the fast unit job.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
-import pandas as pd
 import pytest
-
-if TYPE_CHECKING:
-    pass
 
 _W_SWEEP = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 
@@ -105,36 +99,6 @@ def _build_anchor_priors_from_summary(summary, weight: float) -> dict:
         if p.name.startswith("channel.")
         and p.name.rsplit(".", 1)[-1] in ("half_life", "ec50", "slope", "coefficient")
     }
-
-
-def _extend_data(df: pd.DataFrame, gt: dict, n_extra: int = 4) -> pd.DataFrame:
-    """Append ``n_extra`` weeks of synthetic spend/revenue to the dataset."""
-    rng = np.random.default_rng(seed=9999)
-    date_col = gt["date_column"]
-    target_col = gt["target_column"]
-
-    last_date = pd.to_datetime(df[date_col].iloc[-1])
-    new_dates = pd.date_range(
-        start=last_date + pd.Timedelta(weeks=1),
-        periods=n_extra,
-        freq="W-MON",
-    )
-
-    extra = {date_col: new_dates.strftime("%Y-%m-%d")}
-    for ch in gt["channels"]:
-        last_spend = float(df[ch["name"]].iloc[-4:].mean())
-        extra[ch["name"]] = (
-            last_spend * (1.0 + rng.normal(0, 0.1, n_extra))
-        ).clip(min=0).tolist()
-
-    # Approximate revenue using mean of last rows plus noise
-    last_rev = float(df[target_col].iloc[-4:].mean())
-    extra[target_col] = (
-        last_rev * (1.0 + rng.normal(0, 0.05, n_extra))
-    ).clip(min=0).tolist()
-
-    extra_df = pd.DataFrame(extra)
-    return pd.concat([df, extra_df], ignore_index=True)
 
 
 # ---------------------------------------------------------------------------
