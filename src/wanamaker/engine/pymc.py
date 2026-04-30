@@ -591,15 +591,21 @@ def _geometric_adstock_tensor(pytensor: Any, pt: Any, spend: Any, decay: Any) ->
     whatever length the spend tensor actually has at evaluate time, which is
     what makes future-plan posterior predictive draws possible.
 
-    For each step the recurrence is ``s_t = x_t + decay * s_{t-1}`` with
+    For each step the recurrence is ``s_t = x_t + d * s_{t-1}`` with
     ``s_{-1} = 0``, identical to the previous unrolled implementation.
+
+    ``decay`` is passed as a ``non_sequences`` argument rather than captured
+    from the closure so scan can see its full RNG-dependency graph (PyMC's
+    ``LogNormal`` half_life carries a shared RNG that scan cannot infer
+    through a Python closure).
     """
     spend_tensor = pt.as_tensor_variable(spend, dtype="float64")
     initial = pt.zeros((), dtype="float64")
     result, _ = pytensor.scan(
-        fn=lambda x_t, prev: x_t + decay * prev,
+        fn=lambda x_t, prev, d: x_t + d * prev,
         sequences=[spend_tensor],
         outputs_info=[initial],
+        non_sequences=[decay],
         strict=True,
     )
     return result
