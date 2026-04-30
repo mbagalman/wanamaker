@@ -11,9 +11,10 @@ Verifies the contract that all engines depend on:
 from __future__ import annotations
 
 import math
+
 import pytest
 
-from wanamaker.model.priors import ChannelPriors, default_priors_for_category
+from wanamaker.model.priors import default_priors_for_category
 from wanamaker.model.spec import (
     AnchoredPrior,
     ChannelSpec,
@@ -22,7 +23,6 @@ from wanamaker.model.spec import (
     ModelSpec,
     SeasonalitySpec,
 )
-
 
 # ---------------------------------------------------------------------------
 # ChannelSpec
@@ -64,6 +64,14 @@ class TestLiftPrior:
     def test_custom_confidence(self) -> None:
         lp = LiftPrior(mean_roi=1.0, sd_roi=0.2, confidence=0.90)
         assert lp.confidence == 0.90
+
+    def test_rejects_non_positive_sd(self) -> None:
+        with pytest.raises(ValueError, match="sd_roi"):
+            LiftPrior(mean_roi=1.0, sd_roi=0.0)
+
+    def test_rejects_invalid_confidence(self) -> None:
+        with pytest.raises(ValueError, match="confidence"):
+            LiftPrior(mean_roi=1.0, sd_roi=0.2, confidence=1.0)
 
     def test_is_frozen(self) -> None:
         lp = LiftPrior(mean_roi=1.0, sd_roi=0.2)

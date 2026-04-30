@@ -14,10 +14,15 @@ Separation of concerns:
 
 from __future__ import annotations
 
+import math
+
 from wanamaker.config import WanamakerConfig
+from wanamaker.data.io import load_lift_test_csv
 from wanamaker.data.taxonomy import DEFAULT_CHANNEL_CATEGORIES
 from wanamaker.model.priors import default_priors_for_category
-from wanamaker.model.spec import ChannelSpec, ModelSpec
+from wanamaker.model.spec import ChannelSpec, LiftPrior, ModelSpec
+
+_NORMAL_95_Z = 1.959963984540054
 
 
 def build_model_spec(cfg: WanamakerConfig) -> ModelSpec:
@@ -70,6 +75,7 @@ def build_model_spec(cfg: WanamakerConfig) -> ModelSpec:
         ch.name: default_priors_for_category(ch.category)
         for ch in cfg.channels
     }
+    lift_test_priors = _load_lift_test_priors(cfg)
 
     return ModelSpec(
         channels=channel_specs,
@@ -77,5 +83,36 @@ def build_model_spec(cfg: WanamakerConfig) -> ModelSpec:
         date_column=cfg.data.date_column,
         control_columns=list(cfg.data.control_columns),
         channel_priors=channel_priors,
+        lift_test_priors=lift_test_priors,
         runtime_mode=cfg.run.runtime_mode,
     )
+
+
+def _load_lift_test_priors(cfg: WanamakerConfig) -> dict[str, LiftPrior]:
+    if cfg.data.lift_test_csv is None:
+        return {}
+
+    channel_names = {channel.name for channel in cfg.channels}
+    lift_tests = load_lift_test_csv(cfg.data.lift_test_csv)
+    unknown = sorted(set(lift_tests["channel"]) - channel_names)
+    if unknown:
+        raise ValueError(
+            "lift-test CSV contains channels that are not configured: "
+            f"{unknown}. Add them to channels or remove the lift-test rows."
+        )
+
+    priors: dict[str, LiftPrior] = {}
+    for row in lift_tests.itertuples(index=False):
+        interval_width = float(row.ci_upper) - float(row.ci_lower)
+        sd_roi = interval_width / (2.0 * _NORMAL_95_Z)
+        if not math.isfinite(sd_roi) or sd_roi <= 0.0:
+            raise ValueError(
+                f"lift-test CSV produced a non-positive prior sd for channel {row.channel!r}"
+            )
+        priors[str(row.channel)] = LiftPrior(
+            mean_roi=float(row.lift_estimate),
+            sd_roi=sd_roi,
+            confidence=0.95,
+        )
+
+    return priors

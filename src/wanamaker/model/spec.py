@@ -41,11 +41,11 @@ PyMC, NumPyro, or Stan code without leakage between layers.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
 from wanamaker.model.priors import ChannelPriors
-
 
 # ---------------------------------------------------------------------------
 # Per-channel structural spec
@@ -106,6 +106,13 @@ class LiftPrior:
     mean_roi: float
     sd_roi: float
     confidence: float = 0.95
+
+    def __post_init__(self) -> None:
+        """Validate lift-prior uncertainty."""
+        if not math.isfinite(self.sd_roi) or self.sd_roi <= 0.0:
+            raise ValueError(f"sd_roi must be strictly positive; got {self.sd_roi!r}")
+        if not 0.0 < self.confidence < 1.0:
+            raise ValueError(f"confidence must be in (0, 1); got {self.confidence!r}")
 
 
 # ---------------------------------------------------------------------------
