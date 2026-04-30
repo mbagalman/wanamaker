@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -268,6 +269,72 @@ class PyMCEngine:
             hdi_low=hdi[:, 0].tolist(),
             hdi_high=hdi[:, 1].tolist(),
             interval_mass=INTERVAL_MASS,
+        )
+
+    def load_posterior(
+        self,
+        run_dir: Path,
+        model_spec: Any,
+        data: pd.DataFrame,
+    ) -> Posterior:
+        """Reconstruct a ``Posterior`` from a saved run artifact directory.
+
+        Rebuilds the PyMC model graph from the same ``model_spec`` and
+        ``data`` the run was fit on, then loads the persisted
+        ``posterior.nc`` (an ArviZ ``InferenceData``) and wires them
+        together. The returned ``Posterior`` is suitable for
+        ``posterior_predictive`` calls — both the in-sample path and the
+        new-data forecast path.
+
+        The caller must supply the original training data; we need it to
+        recompute control centring statistics and to seed the saturation
+        prior on each channel's spend median.
+
+        Args:
+            run_dir: Root directory of the run (``<artifact_dir>/runs/<run_id>``).
+            model_spec: The ``ModelSpec`` used at fit time.
+            data: The training data the run was fit on.
+
+        Returns:
+            A ``Posterior`` whose ``raw`` is a ``PyMCRawPosterior`` with the
+            loaded ``idata`` and a freshly-built model graph.
+
+        Raises:
+            FileNotFoundError: If ``posterior.nc`` is missing from ``run_dir``.
+        """
+        pm, az, _, _ = _require_pymc_stack()
+
+        nc_path = run_dir / "posterior.nc"
+        if not nc_path.exists():
+            raise FileNotFoundError(
+                f"posterior.nc not found in {run_dir}. "
+                "Run 'wanamaker fit' to produce a complete artifact directory."
+            )
+        idata = az.from_netcdf(nc_path)
+
+        target_column = _target_column(model_spec, data)
+        date_column = getattr(model_spec, "date_column", None) or None
+        period_labels: list[str] | None = (
+            data[date_column].astype(str).tolist()
+            if date_column and date_column in data.columns
+            else None
+        )
+        _validate_columns(model_spec, data, target_column)
+
+        model, control_means, control_stds = self._build_model(
+            pm, model_spec, data, target_column
+        )
+        return Posterior(
+            raw=PyMCRawPosterior(
+                idata=idata,
+                model=model,
+                model_spec=model_spec,
+                date_column=date_column,
+                target_column=target_column,
+                period_labels=period_labels,
+                control_means=control_means,
+                control_stds=control_stds,
+            )
         )
 
     def _build_model(

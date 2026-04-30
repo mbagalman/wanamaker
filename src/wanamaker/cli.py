@@ -22,6 +22,7 @@ from __future__ import annotations
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -385,18 +386,82 @@ def report(
 def forecast(
     run_id: str = typer.Option(..., "--run-id"),
     plan: Path = typer.Option(..., "--plan", exists=True),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    seed: int | None = typer.Option(
+        None,
+        "--seed",
+        help="Override the run's stored seed for posterior-predictive sampling.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Path to save the Markdown report. Default: <run_dir>/forecast_<plan>.md",
+    ),
 ) -> None:
     """Forecast the target metric under a single budget plan (FR-5.1 mode 2)."""
-    raise NotImplementedError("Phase 1: wire up forecast command")
+    from wanamaker.forecast.posterior_predictive import forecast as run_forecast
+
+    plan_engine, posterior, summary, paths, run_seed = _load_run_for_forecast(
+        artifact_dir, run_id
+    )
+    seed_used = seed if seed is not None else run_seed
+
+    typer.echo(f"Forecasting {plan} with run {run_id} (seed={seed_used})…")
+    result = run_forecast(summary, plan, seed_used, plan_engine)
+
+    _print_forecast_table(result)
+
+    output_path = output if output is not None else (
+        paths.root / f"forecast_{Path(plan).stem}.md"
+    )
+    output_path.write_text(_format_forecast_markdown(result, run_id, plan))
+    typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
 
 
 @app.command(name="compare-scenarios")
 def compare_scenarios(
     run_id: str = typer.Option(..., "--run-id"),
     plans: list[Path] = typer.Option(..., "--plans", exists=True),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    seed: int | None = typer.Option(
+        None,
+        "--seed",
+        help="Override the run's stored seed for posterior-predictive sampling.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help=(
+            "Path to save the Markdown report. "
+            "Default: <run_dir>/scenario_comparison.md"
+        ),
+    ),
 ) -> None:
     """Rank multiple budget plans with uncertainty (FR-5.2)."""
-    raise NotImplementedError("Phase 1: wire up compare-scenarios command")
+    from wanamaker.forecast.scenarios import compare_scenarios as run_compare
+
+    plan_engine, _, summary, paths, run_seed = _load_run_for_forecast(
+        artifact_dir, run_id
+    )
+    seed_used = seed if seed is not None else run_seed
+
+    typer.echo(f"Comparing {len(plans)} plan(s) for run {run_id} (seed={seed_used})…")
+    plan_paths: list[Any] = list(plans)
+    results = run_compare(summary, plan_paths, seed_used, plan_engine)
+
+    _print_scenario_comparison_table(results)
+
+    output_path = output if output is not None else paths.root / "scenario_comparison.md"
+    output_path.write_text(_format_scenario_comparison_markdown(results, run_id))
+    typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
 
 
 @app.command()
@@ -863,6 +928,293 @@ def _print_diff_summary(diff: object) -> None:
     typer.echo(
         typer.style(f"  Unexplained fraction: {fraction:.1%}", fg=colour)
     )
+
+
+def _load_run_for_forecast(
+    artifact_dir: Path, run_id: str
+) -> tuple[Any, Any, Any, Any, int]:
+    """Load everything ``forecast`` and ``compare-scenarios`` need for a run.
+
+    Returns ``(plan_engine, posterior, summary, paths, run_seed)``:
+
+    - ``plan_engine`` conforms to ``PosteriorPredictiveEngine`` and routes
+      calls to the underlying ``PyMCEngine`` with the loaded ``Posterior``
+      bound. The Protocol takes a ``PosteriorSummary`` while the engine
+      needs a ``Posterior``; the bound adapter bridges them.
+    - ``posterior`` is the reconstructed PyMC posterior (also returned so
+      the caller can use it for unrelated work such as report rendering).
+    - ``summary`` is the ``PosteriorSummary`` from ``summary.json``.
+    - ``paths`` is the resolved ``RunPaths`` for the run directory.
+    - ``run_seed`` comes from the snapshotted config; the CLI applies it
+      when ``--seed`` is not specified.
+    """
+    from wanamaker.artifacts import deserialize_summary, run_paths
+    from wanamaker.config import load_config
+    from wanamaker.data.io import load_input_csv
+    from wanamaker.engine.pymc import PyMCEngine
+    from wanamaker.model.builder import build_model_spec
+
+    paths = run_paths(artifact_dir, run_id)
+    if not paths.config.exists():
+        typer.echo(
+            typer.style(
+                f"Error: run {run_id!r} not found in {artifact_dir / 'runs'}. "
+                "Run 'wanamaker fit' first or check --artifact-dir.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not paths.posterior.exists():
+        typer.echo(
+            typer.style(
+                f"Error: posterior.nc missing for run {run_id!r} at {paths.posterior}. "
+                "The fit may have been interrupted; re-run 'wanamaker fit'.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not paths.summary.exists():
+        typer.echo(
+            typer.style(
+                f"Error: summary.json missing for run {run_id!r} at {paths.summary}.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    cfg = load_config(paths.config)
+    typer.echo(f"Loading data: {cfg.data.csv_path}")
+    data = load_input_csv(cfg.data)
+    model_spec = build_model_spec(cfg)
+    summary = deserialize_summary(paths.summary.read_text())
+
+    typer.echo("Reconstructing PyMC model from run artifact…")
+    engine = PyMCEngine()
+    posterior = engine.load_posterior(paths.root, model_spec, data)
+    plan_engine = _PosteriorBoundEngine(engine, posterior)
+    return plan_engine, posterior, summary, paths, int(cfg.run.seed)
+
+
+class _PosteriorBoundEngine:
+    """Adapt ``PyMCEngine`` to the forecast layer's
+    ``PosteriorPredictiveEngine`` protocol by binding a specific
+    ``Posterior``.
+
+    The protocol's signature takes a ``PosteriorSummary``; the engine call
+    actually needs a ``Posterior``. Binding lets the CLI hand the engine
+    object the forecast layer's ``forecast()`` and ``compare_scenarios()``
+    expect without changing those public surfaces.
+    """
+
+    def __init__(self, engine: Any, posterior: Any) -> None:
+        self._engine = engine
+        self._posterior = posterior
+
+    def posterior_predictive(
+        self,
+        posterior_summary: Any,  # noqa: ARG002 — Protocol contract
+        new_data: Any,
+        seed: int,
+    ) -> Any:
+        return self._engine.posterior_predictive(self._posterior, new_data, seed)
+
+
+def _print_forecast_table(result: Any) -> None:
+    """Print the forecast result as a human-readable table."""
+    typer.echo("\nPosterior predictive forecast")
+    if result.spend_invariant_channels:
+        typer.echo(
+            typer.style(
+                f"  Spend-invariant channels (no reallocation recommendation): "
+                f"{', '.join(result.spend_invariant_channels)}",
+                fg=typer.colors.YELLOW,
+            )
+        )
+    if result.extrapolation_flags:
+        typer.echo(
+            typer.style(
+                f"  Extrapolation warnings: {len(result.extrapolation_flags)} cell(s) "
+                "outside the observed historical range:",
+                fg=typer.colors.YELLOW,
+            )
+        )
+        for flag in result.extrapolation_flags:
+            typer.echo(
+                typer.style(
+                    f"    {flag.period} · {flag.channel}: planned {flag.planned_spend:,.0f} "
+                    f"({flag.direction.replace('_', ' ')}; observed range "
+                    f"{flag.observed_spend_min:,.0f}–{flag.observed_spend_max:,.0f})",
+                    fg=typer.colors.YELLOW,
+                )
+            )
+    typer.echo("")
+    typer.echo(f"  {'Period':<12} {'Mean':>14} {'95% HDI low':>14} {'95% HDI high':>14}")
+    for period, mean, low, high in zip(
+        result.periods, result.mean, result.hdi_low, result.hdi_high, strict=True,
+    ):
+        typer.echo(f"  {period:<12} {mean:>14,.2f} {low:>14,.2f} {high:>14,.2f}")
+    total_mean = sum(result.mean)
+    typer.echo(f"  {'Total':<12} {total_mean:>14,.2f}")
+
+
+def _format_forecast_markdown(result: Any, run_id: str, plan_path: Path) -> str:
+    """Produce the saved Markdown report for a forecast."""
+    lines: list[str] = []
+    lines.append(f"# Forecast: {plan_path.name}")
+    lines.append("")
+    lines.append(f"- Run ID: `{run_id}`")
+    lines.append(f"- Plan: `{plan_path}`")
+    lines.append(f"- Credible interval: {result.interval_mass:.0%} HDI")
+    lines.append("")
+
+    if result.spend_invariant_channels:
+        lines.append("## Spend-invariant channels")
+        lines.append("")
+        lines.append(
+            "Saturation could not be estimated from training data. "
+            "Reallocation recommendations are not produced for:"
+        )
+        lines.append("")
+        for channel in result.spend_invariant_channels:
+            lines.append(f"- `{channel}`")
+        lines.append("")
+
+    if result.extrapolation_flags:
+        lines.append("## Extrapolation warnings")
+        lines.append("")
+        lines.append(
+            f"{len(result.extrapolation_flags)} plan cell(s) fall outside the "
+            "observed historical range. Predictions in these cells extrapolate "
+            "the model beyond what data supports."
+        )
+        lines.append("")
+        lines.append("| Period | Channel | Planned | Direction | Observed range |")
+        lines.append("|---|---|---|---|---|")
+        for flag in result.extrapolation_flags:
+            lines.append(
+                f"| {flag.period} | `{flag.channel}` | {flag.planned_spend:,.0f} | "
+                f"{flag.direction.replace('_', ' ')} | "
+                f"{flag.observed_spend_min:,.0f}–{flag.observed_spend_max:,.0f} |"
+            )
+        lines.append("")
+
+    lines.append("## Predictive draws")
+    lines.append("")
+    lines.append("| Period | Mean | 95% HDI low | 95% HDI high |")
+    lines.append("|---|---|---|---|")
+    for period, mean, low, high in zip(
+        result.periods, result.mean, result.hdi_low, result.hdi_high, strict=True,
+    ):
+        lines.append(f"| {period} | {mean:,.2f} | {low:,.2f} | {high:,.2f} |")
+    total_mean = sum(result.mean)
+    lines.append(f"| **Total** | **{total_mean:,.2f}** | | |")
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _print_scenario_comparison_table(results: list[Any]) -> None:
+    """Print the ranked scenario comparison as a human-readable table."""
+    typer.echo("\nScenario comparison (ranked by expected outcome)")
+    typer.echo("")
+    typer.echo(
+        f"  {'Rank':<5} {'Plan':<24} {'Expected outcome':>18} {'95% HDI':>30}"
+    )
+    for rank, result in enumerate(results, start=1):
+        hdi_label = (
+            f"{result.expected_outcome_hdi_low:,.0f}–"
+            f"{result.expected_outcome_hdi_high:,.0f}"
+        )
+        typer.echo(
+            f"  {rank:<5} {result.plan_name:<24} "
+            f"{result.expected_outcome_mean:>18,.2f} {hdi_label:>30}"
+        )
+    for result in results:
+        if result.spend_invariant_channels:
+            typer.echo(
+                typer.style(
+                    f"  {result.plan_name}: spend-invariant channels "
+                    f"({', '.join(result.spend_invariant_channels)}) "
+                    "are excluded from reallocation guidance.",
+                    fg=typer.colors.YELLOW,
+                )
+            )
+        if result.extrapolation_flags:
+            typer.echo(
+                typer.style(
+                    f"  {result.plan_name}: {len(result.extrapolation_flags)} "
+                    "extrapolation warning(s) — see saved report.",
+                    fg=typer.colors.YELLOW,
+                )
+            )
+
+
+def _format_scenario_comparison_markdown(results: list[Any], run_id: str) -> str:
+    """Produce the saved Markdown report for a scenario comparison."""
+    lines: list[str] = []
+    lines.append("# Scenario comparison")
+    lines.append("")
+    lines.append(f"- Run ID: `{run_id}`")
+    lines.append(f"- Plans compared: {len(results)}")
+    lines.append("")
+
+    lines.append("## Ranking")
+    lines.append("")
+    lines.append("| Rank | Plan | Expected outcome | 95% HDI low | 95% HDI high |")
+    lines.append("|---|---|---|---|---|")
+    for rank, result in enumerate(results, start=1):
+        lines.append(
+            f"| {rank} | `{result.plan_name}` | "
+            f"{result.expected_outcome_mean:,.2f} | "
+            f"{result.expected_outcome_hdi_low:,.2f} | "
+            f"{result.expected_outcome_hdi_high:,.2f} |"
+        )
+    lines.append("")
+
+    lines.append("## Total spend by channel")
+    lines.append("")
+    if results:
+        all_channels = sorted({c for r in results for c in r.total_spend_by_channel})
+        header = "| Plan | " + " | ".join(f"`{c}`" for c in all_channels) + " |"
+        lines.append(header)
+        lines.append("|" + "---|" * (len(all_channels) + 1))
+        for result in results:
+            row = [f"`{result.plan_name}`"]
+            for channel in all_channels:
+                row.append(f"{result.total_spend_by_channel.get(channel, 0.0):,.0f}")
+            lines.append("| " + " | ".join(row) + " |")
+        lines.append("")
+
+    flagged = [r for r in results if r.extrapolation_flags or r.spend_invariant_channels]
+    if flagged:
+        lines.append("## Caveats")
+        lines.append("")
+        for result in flagged:
+            if result.spend_invariant_channels:
+                lines.append(
+                    f"- **`{result.plan_name}`** — saturation not estimable "
+                    f"for `{', '.join(result.spend_invariant_channels)}`. "
+                    "These channels are excluded from reallocation guidance "
+                    "(FR-3.2)."
+                )
+            if result.extrapolation_flags:
+                lines.append(
+                    f"- **`{result.plan_name}`** — "
+                    f"{len(result.extrapolation_flags)} plan cell(s) fall "
+                    "outside the observed historical range:"
+                )
+                for flag in result.extrapolation_flags:
+                    lines.append(
+                        f"    - {flag.period} · `{flag.channel}`: "
+                        f"planned {flag.planned_spend:,.0f} "
+                        f"({flag.direction.replace('_', ' ')}; "
+                        f"observed {flag.observed_spend_min:,.0f}–"
+                        f"{flag.observed_spend_max:,.0f})"
+                    )
+        lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":  # pragma: no cover
