@@ -1,4 +1,4 @@
-"""Unit tests for the ``wanamaker diagnose`` CLI command (issue #15).
+"""Unit tests for the ``wanamaker diagnose`` CLI command (issues #15, #13).
 
 Tests cover:
 - Config-independent path (--date-column + --target-column)
@@ -7,6 +7,7 @@ Tests cover:
 - READY → exit 0, USABLE_WITH_WARNINGS → exit 0, NOT_RECOMMENDED → exit 1
 - Output contains expected severity labels
 - Unknown column names produce a skipped-check WARNING
+- Spend-aware checks run when --config supplies spend/control columns
 """
 
 from __future__ import annotations
@@ -75,6 +76,70 @@ def _write_minimal_config(tmp: Path, csv_path: Path) -> Path:
         f"  spend_columns: []\n"
         f"channels: []\n"
     )
+    return p
+
+
+def _write_config_with_spend(tmp: Path, csv_path: Path, spend_cols: list, control_cols: list = []) -> Path:
+    """Write a config that includes spend and control columns."""
+    p = tmp / "config_spend.yaml"
+    spend_yaml = "[" + ", ".join(spend_cols) + "]"
+    control_yaml = "[" + ", ".join(control_cols) + "]"
+    channels_yaml = "\n".join(
+        f"  - name: {c}\n    category: paid_search" for c in spend_cols
+    )
+    p.write_text(
+        f"data:\n"
+        f"  csv_path: {csv_path}\n"
+        f"  date_column: week\n"
+        f"  target_column: revenue\n"
+        f"  spend_columns: {spend_yaml}\n"
+        f"  control_columns: {control_yaml}\n"
+        f"channels:\n{channels_yaml}\n"
+    )
+    return p
+
+
+def _write_collinear_csv(tmp: Path, periods: int = 80) -> Path:
+    """Write a CSV where two spend columns are nearly perfectly correlated."""
+    p = tmp / "collinear.csv"
+    dates = pd.date_range("2020-01-06", periods=periods, freq="W-MON")
+    base = list(range(periods))
+    df = pd.DataFrame({
+        "week": dates.strftime("%Y-%m-%d"),
+        "revenue": [float(i * 100) for i in range(periods)],
+        "search": [float(i * 10) for i in base],
+        "branded_search": [float(i * 10 + 1) for i in base],  # nearly identical
+    })
+    df.to_csv(p, index=False)
+    return p
+
+
+def _write_low_variation_csv(tmp: Path, periods: int = 80) -> Path:
+    """Write a CSV with a constant spend column."""
+    p = tmp / "low_var.csv"
+    dates = pd.date_range("2020-01-06", periods=periods, freq="W-MON")
+    df = pd.DataFrame({
+        "week": dates.strftime("%Y-%m-%d"),
+        "revenue": list(range(periods)),
+        "tv": [5000.0] * periods,        # constant — low variation
+        "search": [float(i * 100) for i in range(periods)],
+    })
+    df.to_csv(p, index=False)
+    return p
+
+
+def _write_leakage_csv(tmp: Path, periods: int = 80) -> Path:
+    """Write a CSV where a control column is derived from the target."""
+    p = tmp / "leakage.csv"
+    dates = pd.date_range("2020-01-06", periods=periods, freq="W-MON")
+    revenue = list(range(100, 100 + periods))
+    df = pd.DataFrame({
+        "week": dates.strftime("%Y-%m-%d"),
+        "revenue": revenue,
+        "search": [float(i * 10) for i in range(periods)],
+        "revenue_lag": [float(v) * 0.99 for v in revenue],  # nearly = revenue → leakage
+    })
+    df.to_csv(p, index=False)
     return p
 
 
@@ -248,3 +313,48 @@ class TestDiagnoseOutputFormat:
             ["diagnose", str(csv), "--date-column", "week", "--target-column", "revenue"],
         )
         assert "Readiness:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Spend-aware checks via --config (issue #13)
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnoseSpendAwareViaConfig:
+    def test_spend_variation_warning_for_constant_channel(self, tmp_path: Path) -> None:
+        csv = _write_low_variation_csv(tmp_path)
+        cfg = _write_config_with_spend(tmp_path, csv, ["tv", "search"])
+        result = runner.invoke(app, ["diagnose", str(csv), "--config", str(cfg)])
+        assert "spend_variation" in result.output.lower() or "WARNING" in result.output
+        assert "tv" in result.output
+
+    def test_collinearity_warning_for_correlated_channels(self, tmp_path: Path) -> None:
+        csv = _write_collinear_csv(tmp_path)
+        cfg = _write_config_with_spend(tmp_path, csv, ["search", "branded_search"])
+        result = runner.invoke(app, ["diagnose", str(csv), "--config", str(cfg)])
+        assert "WARNING" in result.output
+        assert "collinearity" in result.output.lower() or "correlated" in result.output.lower()
+
+    def test_target_leakage_warning(self, tmp_path: Path) -> None:
+        csv = _write_leakage_csv(tmp_path)
+        cfg = _write_config_with_spend(tmp_path, csv, ["search"], ["revenue_lag"])
+        result = runner.invoke(app, ["diagnose", str(csv), "--config", str(cfg)])
+        assert "WARNING" in result.output
+        assert "revenue_lag" in result.output
+
+    def test_spend_aware_checks_not_run_without_config(self, tmp_path: Path) -> None:
+        """Without a config, spend-aware checks must not run (no spend cols known)."""
+        csv = _write_low_variation_csv(tmp_path)
+        result = runner.invoke(
+            app,
+            ["diagnose", str(csv), "--date-column", "week", "--target-column", "revenue"],
+        )
+        # tv is constant but without config the spend_variation check shouldn't fire
+        assert "spend_variation" not in result.output.lower()
+
+    def test_variable_count_info_shown_with_config(self, tmp_path: Path) -> None:
+        csv = _write_clean_csv(tmp_path)
+        cfg = _write_config_with_spend(tmp_path, csv, ["search"])
+        result = runner.invoke(app, ["diagnose", str(csv), "--config", str(cfg)])
+        assert result.exit_code == 0
+        assert "variable_count" in result.output.lower() or "INFO" in result.output

@@ -69,11 +69,15 @@ def diagnose(
     import pandas as pd
 
     from wanamaker.diagnose.checks import (
+        check_collinearity,
         check_date_regularity,
         check_history_length,
         check_missing_values,
+        check_spend_variation,
         check_structural_breaks,
+        check_target_leakage,
         check_target_stability,
+        check_variable_count,
     )
     from wanamaker.diagnose.readiness import CheckResult, CheckSeverity, ReadinessLevel
 
@@ -87,11 +91,16 @@ def diagnose(
     # ------------------------------------------------------------------
     # 2. Resolve column names
     # ------------------------------------------------------------------
+    resolved_spend_cols: list[str] = []
+    resolved_control_cols: list[str] = []
+
     if config is not None:
         from wanamaker.config import load_config
         cfg = load_config(config)
         resolved_date_col = cfg.data.date_column
         resolved_target_col = cfg.data.target_column
+        resolved_spend_cols = list(cfg.data.spend_columns or [])
+        resolved_control_cols = list(cfg.data.control_columns or [])
     else:
         resolved_date_col = date_column
         resolved_target_col = target_column
@@ -162,6 +171,14 @@ def diagnose(
     _try(check_missing_values, df)
     _try(check_target_stability, df, resolved_target_col)
     _try(check_structural_breaks, df, resolved_target_col, resolved_date_col)
+
+    # Spend-aware checks — only when column lists are known (config path)
+    if resolved_spend_cols:
+        _try(check_spend_variation, df, resolved_spend_cols)
+        _try(check_collinearity, df, resolved_spend_cols, resolved_control_cols)
+        _try(check_variable_count, df, resolved_spend_cols, resolved_control_cols)
+    if resolved_control_cols and resolved_target_col:
+        _try(check_target_leakage, df, resolved_target_col, resolved_control_cols)
 
     # ------------------------------------------------------------------
     # 4. Determine readiness level
