@@ -14,5 +14,27 @@ from wanamaker.trust_card.card import (
     TrustDimension,
     TrustStatus,
 )
+from wanamaker.trust_card.compute import (
+    PriorSensitivityResult,
+    build_trust_card,
+    convergence_dimension,
+    holdout_accuracy_dimension,
+    lift_test_consistency_dimension,
+    prior_sensitivity_dimension,
+    refresh_stability_dimension,
+    saturation_identifiability_dimension,
+)
 
-__all__ = ["TrustCard", "TrustDimension", "TrustStatus"]
+__all__ = [
+    "PriorSensitivityResult",
+    "TrustCard",
+    "TrustDimension",
+    "TrustStatus",
+    "build_trust_card",
+    "convergence_dimension",
+    "holdout_accuracy_dimension",
+    "lift_test_consistency_dimension",
+    "prior_sensitivity_dimension",
+    "refresh_stability_dimension",
+    "saturation_identifiability_dimension",
+]
