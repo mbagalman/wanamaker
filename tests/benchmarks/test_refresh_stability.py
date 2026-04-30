@@ -7,27 +7,19 @@ NFR-5 targets (must hold at the medium preset, w=0.3):
   - No single channel moves > 25 %
   - ≥ 90 % of parameter movements classified as non-unexplained
 
-The test simulates a "refresh" by extending the synthetic benchmark dataset
-by 4 weeks and re-fitting.  It sweeps w in {0.0, 0.1, 0.2, 0.3, 0.4, 0.5,
+The test uses the refresh-stability benchmark dataset: a known-stable base
+series plus a deterministic "4 weeks added" variant. It sweeps w in
+{0.0, 0.1, 0.2, 0.3, 0.4, 0.5,
 0.6, 0.7} and measures the three NFR-5 metrics for each weight.  The medium
 preset (w=0.3) must meet all three targets; other presets are informational.
-
-Blocked by benchmark dataset (#24) for the refresh-stability variant; uses
-the existing synthetic ground-truth dataset as a proxy until that is ready.
 
 Marked ``engine`` — skipped automatically in the fast unit job.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
-import pandas as pd
 import pytest
-
-if TYPE_CHECKING:
-    pass
 
 _W_SWEEP = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 
@@ -77,7 +69,7 @@ def _unexplained_fraction_from_summaries(
     curr_summary,
 ) -> float:
     """Compute unexplained-movement fraction using classify_movement."""
-    from wanamaker.refresh.classify import classify_movement, MovementClass
+    from wanamaker.refresh.classify import MovementClass, classify_movement
 
     prev_map = {p.name: p for p in prev_summary.parameters}
     count_total = 0
@@ -109,36 +101,6 @@ def _build_anchor_priors_from_summary(summary, weight: float) -> dict:
     }
 
 
-def _extend_data(df: pd.DataFrame, gt: dict, n_extra: int = 4) -> pd.DataFrame:
-    """Append ``n_extra`` weeks of synthetic spend/revenue to the dataset."""
-    rng = np.random.default_rng(seed=9999)
-    date_col = gt["date_column"]
-    target_col = gt["target_column"]
-
-    last_date = pd.to_datetime(df[date_col].iloc[-1])
-    new_dates = pd.date_range(
-        start=last_date + pd.Timedelta(weeks=1),
-        periods=n_extra,
-        freq="W-MON",
-    )
-
-    extra = {date_col: new_dates.strftime("%Y-%m-%d")}
-    for ch in gt["channels"]:
-        last_spend = float(df[ch["name"]].iloc[-4:].mean())
-        extra[ch["name"]] = (
-            last_spend * (1.0 + rng.normal(0, 0.1, n_extra))
-        ).clip(min=0).tolist()
-
-    # Approximate revenue using mean of last rows plus noise
-    last_rev = float(df[target_col].iloc[-4:].mean())
-    extra[target_col] = (
-        last_rev * (1.0 + rng.normal(0, 0.05, n_extra))
-    ).clip(min=0).tolist()
-
-    extra_df = pd.DataFrame(extra)
-    return pd.concat([df, extra_df], ignore_index=True)
-
-
 # ---------------------------------------------------------------------------
 # Core benchmark test
 # ---------------------------------------------------------------------------
@@ -159,9 +121,9 @@ def test_medium_preset_meets_nfr5() -> None:
     except ImportError:
         pytest.skip("PyMC engine not available.")
 
-    from wanamaker.benchmarks.loaders import load_synthetic_ground_truth
+    from wanamaker.benchmarks.loaders import load_refresh_stability
 
-    df, gt = load_synthetic_ground_truth()
+    df, df_extended, gt = load_refresh_stability()
     engine = PyMCEngine()
 
     # Initial fit (no anchoring)
@@ -173,8 +135,7 @@ def test_medium_preset_meets_nfr5() -> None:
         c.channel: c.mean_contribution for c in summary_initial.channel_contributions
     }
 
-    # Extend dataset by 4 weeks and re-fit with medium anchor weight
-    df_extended = _extend_data(df, gt, n_extra=4)
+    # Re-fit on the 4-weeks-added variant with medium anchor weight.
     anchor_priors = _build_anchor_priors_from_summary(summary_initial, weight=0.3)
     spec_refresh = _build_spec(gt, anchor_priors=anchor_priors)
     result_refresh = engine.fit(spec_refresh, df_extended, seed=43, runtime_mode="quick")
@@ -218,11 +179,10 @@ def test_anchor_weight_sweep_produces_stability_gradient() -> None:
     except ImportError:
         pytest.skip("PyMC engine not available.")
 
-    from wanamaker.benchmarks.loaders import load_synthetic_ground_truth
+    from wanamaker.benchmarks.loaders import load_refresh_stability
 
-    df, gt = load_synthetic_ground_truth()
+    df, df_extended, gt = load_refresh_stability()
     engine = PyMCEngine()
-    df_extended = _extend_data(df, gt, n_extra=4)
 
     # Initial fit to get the previous posterior
     spec_initial = _build_spec(gt)
