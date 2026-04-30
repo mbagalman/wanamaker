@@ -9,6 +9,7 @@ the local-first rules.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -199,6 +200,8 @@ class PyMCEngine:
             or 1.0
         )
 
+        anchor_priors = dict(getattr(model_spec, "anchor_priors", {}) or {})
+
         with pm.Model(coords=coords) as model:
             intercept = pm.Normal(
                 "intercept",
@@ -210,31 +213,60 @@ class PyMCEngine:
             for channel in channels:
                 spend = data[channel.name].to_numpy(dtype=np.float64)
                 priors = default_priors_for_category(channel.category)
+
+                # --- adstock half-life ---
+                ap_hl = anchor_priors.get(f"channel.{channel.name}.half_life")
+                if ap_hl is not None:
+                    mu_hl, sigma_hl = _blend_lognormal(
+                        priors.half_life_mu, priors.half_life_sigma,
+                        ap_hl.mean, ap_hl.sd, ap_hl.weight,
+                    )
+                else:
+                    mu_hl, sigma_hl = priors.half_life_mu, priors.half_life_sigma
                 half_life = pm.LogNormal(
-                    f"channel__{channel.name}__half_life",
-                    mu=priors.half_life_mu,
-                    sigma=priors.half_life_sigma,
+                    f"channel__{channel.name}__half_life", mu=mu_hl, sigma=sigma_hl,
                 )
+
                 decay = pm.Deterministic(
                     f"channel__{channel.name}__decay",
                     pt.power(0.5, 1.0 / half_life),
                 )
                 adstocked = _geometric_adstock_tensor(pt, spend, decay)
+
+                # --- Hill EC50 ---
+                ap_ec50 = anchor_priors.get(f"channel.{channel.name}.ec50")
+                if ap_ec50 is not None:
+                    mu_ec50, sigma_ec50 = _blend_lognormal(
+                        _log_positive_median(spend), 1.0,
+                        ap_ec50.mean, ap_ec50.sd, ap_ec50.weight,
+                    )
+                else:
+                    mu_ec50, sigma_ec50 = _log_positive_median(spend), 1.0
                 ec50 = pm.LogNormal(
-                    f"channel__{channel.name}__ec50",
-                    mu=_log_positive_median(spend),
-                    sigma=1.0,
+                    f"channel__{channel.name}__ec50", mu=mu_ec50, sigma=sigma_ec50,
                 )
+
+                # --- Hill slope ---
+                ap_slope = anchor_priors.get(f"channel.{channel.name}.slope")
+                if ap_slope is not None:
+                    mu_slope, sigma_slope = _blend_lognormal(
+                        priors.hill_alpha_mu, priors.hill_alpha_sigma,
+                        ap_slope.mean, ap_slope.sd, ap_slope.weight,
+                    )
+                else:
+                    mu_slope, sigma_slope = priors.hill_alpha_mu, priors.hill_alpha_sigma
                 slope = pm.LogNormal(
-                    f"channel__{channel.name}__slope",
-                    mu=priors.hill_alpha_mu,
-                    sigma=priors.hill_alpha_sigma,
+                    f"channel__{channel.name}__slope", mu=mu_slope, sigma=sigma_slope,
                 )
+
                 saturated = _hill_saturation_tensor(pt, adstocked, ec50, slope)
+
+                # --- channel coefficient ---
                 coefficient = _coefficient_prior(
                     pm=pm,
                     name=f"channel__{channel.name}__coefficient",
                     lift_prior=lift_test_priors.get(channel.name),
+                    anchor_prior=anchor_priors.get(f"channel.{channel.name}.coefficient"),
                     default_sigma=target_std,
                 )
                 contribution = pm.Deterministic(
@@ -381,17 +413,76 @@ def _hill_saturation_tensor(pt: Any, spend: Any, ec50: Any, slope: Any) -> Any:
     return numerator / denominator
 
 
-def _coefficient_prior(pm: Any, name: str, lift_prior: Any | None, default_sigma: float) -> Any:
-    """Return the channel coefficient prior, optionally calibrated by lift tests."""
-    if lift_prior is None:
-        return pm.HalfNormal(name, sigma=default_sigma)
+def _blend_lognormal(
+    mu_default: float,
+    sigma_default: float,
+    prev_mean: float,
+    prev_sd: float,
+    weight: float,
+) -> tuple[float, float]:
+    """Blend default and previous-posterior LogNormal parameters for anchoring.
 
-    return pm.TruncatedNormal(
-        name,
-        mu=float(lift_prior.mean_roi),
-        sigma=float(lift_prior.sd_roi),
-        lower=0.0,
-    )
+    Converts the previous posterior summary (mean, sd) — both in linear scale
+    — to lognormal log-space parameters via the exact lognormal moment equations:
+
+        mu_log  = log(mean) - 0.5 * log(1 + cv²)
+        sig_log = sqrt(log(1 + cv²))   where cv = sd / mean
+
+    Then blends them linearly with the default parameters:
+
+        mu_blend    = (1 - w) * mu_default  + w * mu_log_prev
+        sigma_blend = (1 - w) * sigma_default + w * sigma_log_prev
+
+    Args:
+        mu_default: Default lognormal mu (log-space mean).
+        sigma_default: Default lognormal sigma (log-space std).
+        prev_mean: Previous posterior mean in linear scale (must be > 0).
+        prev_sd: Previous posterior standard deviation in linear scale.
+        weight: Anchoring weight ``w`` in ``[0, 1]``.
+
+    Returns:
+        ``(mu_blend, sigma_blend)`` — log-space parameters for a LogNormal prior.
+    """
+    prev_mean_pos = max(prev_mean, 1e-9)
+    cv2 = (prev_sd / prev_mean_pos) ** 2
+    mu_log_prev = math.log(prev_mean_pos) - 0.5 * math.log1p(cv2)
+    sigma_log_prev = math.sqrt(math.log1p(cv2))
+    mu_blend = (1.0 - weight) * mu_default + weight * mu_log_prev
+    sigma_blend = (1.0 - weight) * sigma_default + weight * max(sigma_log_prev, 1e-6)
+    return mu_blend, sigma_blend
+
+
+def _coefficient_prior(
+    pm: Any,
+    name: str,
+    lift_prior: Any | None,
+    anchor_prior: Any | None,
+    default_sigma: float,
+) -> Any:
+    """Return the channel coefficient prior.
+
+    Priority (highest to lowest):
+    1. Lift-test prior — explicit informative ROI constraint from an experiment.
+    2. Anchor prior — mixture of default and previous posterior (FR-4.4).
+    3. Default HalfNormal — uninformative, first-run baseline.
+    """
+    if lift_prior is not None:
+        return pm.TruncatedNormal(
+            name,
+            mu=float(lift_prior.mean_roi),
+            sigma=float(lift_prior.sd_roi),
+            lower=0.0,
+        )
+    if anchor_prior is not None:
+        # Blend: default HalfNormal has effective mu=0; anchored component pulls
+        # toward the previous posterior mean with weight w.
+        w = float(anchor_prior.weight)
+        blended_mu = w * float(anchor_prior.mean)
+        blended_sigma = max(
+            (1.0 - w) * default_sigma + w * float(anchor_prior.sd), 1e-6
+        )
+        return pm.TruncatedNormal(name, mu=blended_mu, sigma=blended_sigma, lower=0.0)
+    return pm.HalfNormal(name, sigma=default_sigma)
 
 
 def _log_positive_median(values: NDArray[np.float64]) -> float:

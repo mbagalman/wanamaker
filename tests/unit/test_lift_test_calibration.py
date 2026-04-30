@@ -162,6 +162,7 @@ def test_pymc_coefficient_prior_uses_lift_prior_when_present(tmp_path: Path) -> 
         pm=fake_pm,
         name="channel__search__coefficient",
         lift_prior=spec.lift_test_priors["search"],
+        anchor_prior=None,
         default_sigma=99.0,
     )
 
@@ -182,6 +183,7 @@ def test_pymc_coefficient_prior_uses_default_without_lift_prior() -> None:
         pm=fake_pm,
         name="channel__tv__coefficient",
         lift_prior=None,
+        anchor_prior=None,
         default_sigma=10.0,
     )
 
