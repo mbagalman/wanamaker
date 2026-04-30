@@ -13,10 +13,10 @@ v1 dimensions (FR-5.4):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class TrustStatus(str, Enum):
+class TrustStatus(StrEnum):
     PASS = "pass"
     MODERATE = "moderate"
     WEAK = "weak"
@@ -32,3 +32,21 @@ class TrustDimension:
 @dataclass(frozen=True)
 class TrustCard:
     dimensions: list[TrustDimension]
+
+    def dimension(self, name: str) -> TrustDimension | None:
+        """Return one dimension by name, or ``None`` when absent."""
+        return next((dimension for dimension in self.dimensions if dimension.name == name), None)
+
+    @property
+    def has_weak_dimension(self) -> bool:
+        """Whether any dimension should trigger hedged report language."""
+        return any(dimension.status == TrustStatus.WEAK for dimension in self.dimensions)
+
+    @property
+    def weak_dimension_names(self) -> list[str]:
+        """Names of dimensions with ``weak`` status, for report templates."""
+        return [
+            dimension.name
+            for dimension in self.dimensions
+            if dimension.status == TrustStatus.WEAK
+        ]
