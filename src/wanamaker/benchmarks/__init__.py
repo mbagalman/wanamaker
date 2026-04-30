@@ -15,3 +15,17 @@ acceptance testing and documentation:
 Datasets live under ``benchmark_data/`` at the repo root and are loaded
 lazily via these functions.
 """
+
+from wanamaker.benchmarks.loaders import (
+    load_public_example,
+    load_public_example_metadata,
+    load_refresh_stability,
+    load_synthetic_ground_truth,
+)
+
+__all__ = [
+    "load_public_example",
+    "load_public_example_metadata",
+    "load_refresh_stability",
+    "load_synthetic_ground_truth",
+]
