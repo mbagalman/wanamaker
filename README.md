@@ -55,9 +55,10 @@ wanamaker run --example public_benchmark
 ## Reading order
 
 1. [BRD/PRD](docs/wanamaker_brd_prd.md) — strategic and product context
-2. [`AGENTS.md`](AGENTS.md) — guidance for AI coding assistants and human
+2. [Privacy and Data Handling](docs/privacy.md) — confidentiality and data isolation guarantees
+3. [`AGENTS.md`](AGENTS.md) — guidance for AI coding assistants and human
    contributors on how to work in this codebase
-3. The `Comparison to Other Tools` page (forthcoming) — Wanamaker vs.
+4. The `Comparison to Other Tools` page (forthcoming) — Wanamaker vs.
    Robyn, Meridian, Recast, PyMC-Marketing
 
 ## License
