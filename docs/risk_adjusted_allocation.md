@@ -18,6 +18,20 @@ The answer should be a staged ramp fraction with explicit risk language. This
 fits Wanamaker's existing direction: scenario comparison, Trust Card warnings,
 forecast uncertainty, and no constrained inverse optimization in v1.
 
+## Prerequisites
+
+Risk-adjusted ramps need **per-draw posterior predictive outcomes**, not just
+the mean and HDI bounds we currently expose through `PredictiveSummary`. Every
+probability metric below — `P_positive`, `P_material_loss`, `q05`, `CVaR_5` —
+is computed on the matrix of `(n_draws, n_periods)` outcome samples for each
+candidate plan. The PyMC engine already produces this matrix internally before
+collapsing it to summary statistics; the foundational work is to expose it
+through the engine Protocol.
+
+This is a hard prerequisite. Without raw draws, the feature has to fall back
+to point estimates and interval widths, which loses the lower-tail story this
+plan exists to tell. See ticket 1 below.
+
 ## Recommendation
 
 Use a **Bayesian fractional Kelly-inspired ramp rule**, not raw Kelly.
@@ -43,9 +57,13 @@ implement it conservatively as a posterior risk calculation.
 
 Let:
 
-- `x0` be the current or user-provided baseline plan.
-- `x_star` be the model-favored plan, such as the best scenario among user
-  supplied options or a future optimizer output.
+- `x0` be the user-supplied baseline plan. v1 takes the baseline explicitly
+  from the user; auto-deriving "current" spend from a recent historical window
+  is deferred to v1.1 because the right window length is itself a product
+  decision worth its own discussion.
+- `x_star` be the user-supplied target plan, typically the preferred entry
+  from `wanamaker compare-scenarios`. A future optimizer output could replace
+  this in v1.1.
 - `f` be the adoption fraction, where `0 <= f <= 1`.
 
 The ramped plan is:
@@ -173,19 +191,23 @@ Use the Trust Card and channel flags:
 The ramp rule should not allow a large move when the recommendation depends on a
 weak dimension.
 
-### Concentration of the Recommendation
+### Concentration of the Recommendation (v1.1 gate)
 
 Large recommendations driven by one uncertain channel are riskier than broad
 recommendations supported across several channels.
 
-Compute:
+Compute (and surface in the candidate report):
 
 ```text
 moved_budget_by_channel = abs(x(f) - x0) by channel
 largest_move_share = max(moved_budget_by_channel) / sum(moved_budget_by_channel)
 ```
 
-If one channel dominates the move, require stronger evidence.
+This is **computed and reported in v1**, but **not gated**. The threshold
+above which a single channel is "too concentrated" interacts with Trust Card
+weakness on that specific channel in non-obvious ways, and we'd rather ship
+the field as an observable signal first and learn the right cutoff from
+benchmark cases than guess at it for the v1 gate set.
 
 ## Kelly-Inspired Sizing
 
@@ -209,10 +231,15 @@ r_s = delta_s(1.0) / baseline_outcome_s
 kelly_fraction_raw = mean(r_s) / variance(r_s)
 ```
 
-Then apply a conservative multiplier:
+Clamp to `[0, 1]` before applying the multiplier — without the clamp,
+``kelly_fraction_raw`` is unbounded above (a tight posterior with a small
+positive mean can easily push the raw value into the tens), and the cap
+gate then does no work. The clamp keeps the Kelly term in the same scale
+as the candidate ramp fractions:
 
 ```text
-fractional_kelly = kelly_fraction_raw * model_confidence_multiplier
+kelly_fraction = min(max(kelly_fraction_raw, 0.0), 1.0)
+fractional_kelly = kelly_fraction * model_confidence_multiplier
 ```
 
 where:
@@ -431,38 +458,85 @@ def recommend_ramp(
 `risk_tolerance` can be deferred. The first version can use a fixed conservative
 profile.
 
-## Ticket Breakdown
+## Ticket Breakdown for v1.0
 
-Suggested development tickets:
+Four tickets, ordered by dependency. Each is meaningfully scoped (about half
+a day to a day and a half of focused work) and self-contained enough that a
+later ticket's tests will also exercise the earlier tickets' code paths.
 
-1. **Design ramp data structures**
-   - Add `RampCandidate`, `RampRecommendation`, and optional `RiskTolerance`.
-   - Ensure JSON serialization works.
+### Ticket 1 · Expose raw posterior predictive draws from the engine (foundational)
 
-2. **Implement plan interpolation**
-   - Normalize both plans using `load_plan`.
-   - Validate identical periods and channels.
-   - Generate `x(f)` for candidate ramp fractions.
+Extend the `PosteriorPredictiveEngine` Protocol so callers can ask for the
+per-draw `(n_draws, n_periods)` outcome matrix in addition to the existing
+`PredictiveSummary`. Update `PyMCEngine.posterior_predictive` to return the
+matrix (the existing implementation already computes it internally before
+collapsing). Existing `forecast()` and `compare_scenarios()` callers keep
+their current behaviour.
 
-3. **Compute posterior risk metrics**
-   - Use posterior predictive draws for baseline and ramped plans.
-   - Compute expected increment, probability positive, material loss
-     probability, 5th percentile, and CVaR.
+Acceptance:
+- A new `PosteriorPredictiveDraws` shape (or equivalent) is part of the
+  engine contract.
+- An engine-marked test fits a real PyMC model and asserts the draws have
+  the expected `(n_draws, n_periods)` shape.
+- The lazy-import contract still holds (no PyMC pulled in at module import).
 
-4. **Add Trust Card gating**
-   - Map weak/moderate dimensions to ramp caps and warning text.
-   - Explicitly block recommendations involving spend-invariant channels.
+### Ticket 2 · `recommend_ramp()` core: math, gates, decision rule
 
-5. **Render user-facing recommendation**
-   - Deterministic Jinja2 template.
-   - No LLM calls.
-   - Use "proceed", "stage", "test first", "do not recommend" language.
+In a new `wanamaker.forecast.ramp` module, implement:
 
-6. **Benchmark and acceptance tests**
-   - Use public example and synthetic data.
-   - Include a case where full move has higher expected value but fails
-     downside or extrapolation gates.
-   - Include a case where a partial move passes.
+- `RampCandidate` and `RampRecommendation` dataclasses, JSON-serialisable
+  through the existing artifact envelope pattern.
+- Plan interpolation `x(f) = x0 + f * (x_star - x0)` over the ladder
+  `{0, 0.10, 0.25, 0.50, 0.75, 1.0}`, with channel/period alignment
+  validation.
+- Per-candidate posterior risk metrics: `expected_increment`,
+  `probability_positive`, `probability_material_loss`, `q05_increment`,
+  `cvar_5`, `largest_move_share`, `extrapolation_flags`,
+  `fractional_kelly` (clamped per the note above).
+- The decision rule: pick the largest `f` that passes all v1 gates;
+  classify the result into `proceed`, `stage`, `test_first`, or
+  `do_not_recommend`.
+- Trust Card gating: weak/moderate dimensions cap ramp; spend-invariant
+  channels block any ramp that would reallocate them.
+
+No CLI yet. Tests cover each metric on synthetic draws, both passing and
+failing cases for each gate, and the four output statuses.
+
+### Ticket 3 · `wanamaker recommend-ramp` CLI command
+
+Wire up the command:
+
+```text
+wanamaker recommend-ramp --run-id <id> --baseline <plan> --target <plan>
+```
+
+Reuses the engine adapter from `wanamaker forecast` so the run's saved
+posterior is rebuilt and bound automatically. Saves a deterministic Jinja2
+Markdown report to `<run_dir>/ramp_<baseline>_to_<target>.md` with the
+selected fraction, the four-status verdict, the per-candidate risk-metric
+table, and an Experiment Advisor handoff sentence when uncertainty is the
+binding constraint.
+
+Tests stub the engine (mirroring `test_cli_forecast.py`) and assert the
+command runs end-to-end, the report file is written, and the status text
+matches the expected category.
+
+### Ticket 4 · Documentation
+
+Surface the feature in user-facing docs without rewriting them:
+
+- `docs/analyst_guide.md`: a "Risk-adjusted ramps" section explaining the
+  four output categories and when to read them as decision guidance vs
+  evidence prompts.
+- `docs/cmo_guide.md`: a paragraph on ramp recommendations as the
+  conservative alternative to "the model says move 100% to Plan B."
+- `docs/quickstart.md`: an optional Step 7 showing the ramp command on the
+  bundled `public_benchmark` dataset.
+- Cross-link to this design note for engineers and reviewers.
+
+The Phase 2 templates (`executive_summary.md.j2`, `trust_card.md.j2`)
+already point to the Trust Card and forecast outputs; deeper integration
+(executive summary embedding the ramp verdict directly) is v1.1 work.
 
 ## Open Questions
 
