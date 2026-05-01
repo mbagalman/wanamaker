@@ -31,6 +31,11 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
+  - Worked Examples:
+      - Overview: examples/index.md
+      - DTC reallocates TV to CTV: examples/tv_to_ctv.md
+      - B2B refresh after a noisy quarter: examples/refresh_after_noisy_quarter.md
+      - A lift test changes the verdict: examples/lift_test_changes_verdict.md
   - Analyst's Guide: analyst_guide.md
   - What Wanamaker Tells Your CMO: cmo_guide.md
   - Privacy and Data Handling: privacy.md

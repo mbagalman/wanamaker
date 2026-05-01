@@ -311,6 +311,8 @@ Trust Card flags a risk. Cautious language is a feature, not a failure.
 
 ## Next Reading
 
+- [Worked Examples](examples/index.md) — three end-to-end walk-throughs:
+  TV→CTV reallocation, refresh after a noisy quarter, lift-test calibration
 - [Analyst's Guide](analyst_guide.md)
 - [What Wanamaker Tells Your CMO](cmo_guide.md)
 - [Risk-Adjusted Allocation Ramps](risk_adjusted_allocation.md)
