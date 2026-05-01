@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from wanamaker.reports._charts import (
     contribution_bars_svg,
     contribution_waterfall_svg,
+    multi_scenario_overlay_svg,
     response_curves_svg,
     roi_dotplot_svg,
     scenario_delta_svg,
@@ -182,6 +183,94 @@ def test_scenario_delta_handles_single_period() -> None:
     )
     # Should still parse; line collapses to a single point but ribbon is valid.
     _parse(svg)
+
+
+# ---------------------------------------------------------------------------
+# multi_scenario_overlay_svg
+# ---------------------------------------------------------------------------
+
+
+def _scenario(name: str, mean_value: float = 1000.0) -> dict:
+    return {
+        "name": name,
+        "periods": ["2026-01-05", "2026-01-12", "2026-01-19"],
+        "mean": [mean_value, mean_value + 100, mean_value + 50],
+        "hdi_low": [mean_value - 100, mean_value, mean_value - 60],
+        "hdi_high": [mean_value + 100, mean_value + 200, mean_value + 160],
+    }
+
+
+def test_multi_scenario_overlay_one_polyline_per_scenario() -> None:
+    scenarios = [_scenario("a"), _scenario("b"), _scenario("c")]
+    svg = multi_scenario_overlay_svg(scenarios)
+    root = _parse(svg)
+
+    polylines = list(root.iter("{http://www.w3.org/2000/svg}polyline"))
+    polygons = list(root.iter("{http://www.w3.org/2000/svg}polygon"))
+    assert len(polylines) == 3
+    assert len(polygons) == 3
+
+
+def test_multi_scenario_overlay_renders_legend_with_each_name() -> None:
+    scenarios = [_scenario("plan_alpha"), _scenario("plan_beta")]
+    svg = multi_scenario_overlay_svg(scenarios)
+
+    assert "plan_alpha" in svg
+    assert "plan_beta" in svg
+
+
+def test_multi_scenario_overlay_uses_distinct_colors_for_first_few_scenarios() -> None:
+    scenarios = [_scenario("a"), _scenario("b")]
+    svg = multi_scenario_overlay_svg(scenarios)
+
+    # The two distinct stroke colors should both appear.
+    assert "#2b5876" in svg  # primary
+    assert "#c2410c" in svg  # second-palette color
+
+
+def test_multi_scenario_overlay_handles_empty_input() -> None:
+    svg = multi_scenario_overlay_svg([])
+    root = _parse(svg)
+    assert root.attrib.get("class", "").endswith("wmk-chart--empty")
+
+
+def test_multi_scenario_overlay_falls_back_on_period_mismatch() -> None:
+    """Different period labels across scenarios -> empty placeholder."""
+    a = _scenario("a")
+    b = _scenario("b")
+    b["periods"] = ["2027-01-05", "2027-01-12", "2027-01-19"]  # different dates
+    svg = multi_scenario_overlay_svg([a, b])
+    root = _parse(svg)
+    assert root.attrib.get("class", "").endswith("wmk-chart--empty")
+    assert "share the same period labels" in svg
+
+
+def test_multi_scenario_overlay_falls_back_on_mismatched_series_lengths() -> None:
+    a = _scenario("a")
+    a["mean"] = [1000.0, 1100.0]  # mismatched length vs periods (which has 3)
+    svg = multi_scenario_overlay_svg([a])
+    root = _parse(svg)
+    assert root.attrib.get("class", "").endswith("wmk-chart--empty")
+
+
+def test_multi_scenario_overlay_is_deterministic() -> None:
+    scenarios = [_scenario("a"), _scenario("b")]
+    assert multi_scenario_overlay_svg(scenarios) == multi_scenario_overlay_svg(
+        scenarios
+    )
+
+
+def test_multi_scenario_overlay_handles_single_scenario_like_legacy() -> None:
+    """N=1 should still produce a usable chart (drop-in replacement for the
+    old single-scenario chart)."""
+    svg = multi_scenario_overlay_svg([_scenario("solo")])
+    root = _parse(svg)
+
+    polylines = list(root.iter("{http://www.w3.org/2000/svg}polyline"))
+    polygons = list(root.iter("{http://www.w3.org/2000/svg}polygon"))
+    assert len(polylines) == 1
+    assert len(polygons) == 1
+    assert "solo" in svg
 
 
 # ---------------------------------------------------------------------------

@@ -459,13 +459,14 @@ def showcase(
         "--title",
         help="Override the showcase title. Default: 'Wanamaker MMM — <run_id short>'.",
     ),
-    scenario: Path | None = typer.Option(
-        None,
+    scenario: list[Path] = typer.Option(
+        [],
         "--scenario",
         exists=True,
         help=(
-            "Optional plan CSV. When provided, the showcase includes a "
-            "forecast section for that plan."
+            "Optional plan CSV. Pass multiple times to compare plans "
+            "side-by-side; the first plan is treated as the baseline for "
+            "the delta column in the comparison table."
         ),
     ),
     open_browser: bool = typer.Option(
@@ -478,7 +479,8 @@ def showcase(
 
     The showcase bundles the executive summary, channel contributions
     (with credible intervals), ROI table, the Trust Card, and an optional
-    scenario forecast into one file with all CSS and SVG charts inlined.
+    side-by-side forecast comparison (one or more ``--scenario`` plans)
+    into one file with all CSS and SVG charts inlined.
     """
     import webbrowser
     from datetime import datetime
@@ -550,17 +552,20 @@ def showcase(
         paths.data_hash.read_text().strip() if paths.data_hash.exists() else ""
     )
 
-    scenario_forecast = None
-    scenario_plan_name = None
-    if scenario is not None:
+    scenario_forecasts: list[Any] = []
+    scenario_plan_names: list[str] = []
+    if scenario:
         from wanamaker.forecast.posterior_predictive import forecast as run_forecast
 
         plan_engine, _, _, _, run_seed = _load_run_for_forecast(
             artifact_dir, run_id
         )
-        typer.echo(f"Forecasting {scenario} for showcase…")
-        scenario_forecast = run_forecast(summary, scenario, run_seed, plan_engine)
-        scenario_plan_name = Path(scenario).stem
+        for plan_path in scenario:
+            typer.echo(f"Forecasting {plan_path} for showcase…")
+            scenario_forecasts.append(
+                run_forecast(summary, plan_path, run_seed, plan_engine)
+            )
+            scenario_plan_names.append(Path(plan_path).stem)
 
     advisor_lines = _safe_advisor_recommendations(
         summary, spend_by_channel=spend_by_channel,
@@ -578,8 +583,8 @@ def showcase(
         run_fingerprint=run_fingerprint,
         engine_label=engine_label or "(unknown)",
         refresh_diff=refresh_diff,
-        scenario_forecast=scenario_forecast,
-        scenario_plan_name=scenario_plan_name,
+        scenarios=scenario_forecasts,
+        scenario_plan_names=scenario_plan_names,
         advisor_recommendations=advisor_lines,
     )
 
@@ -823,7 +828,7 @@ def run(
         artifact_dir=artifact_dir,
         output=None,
         title=None,
-        scenario=None,
+        scenario=[],
         open_browser=False,
     )
     trust_card(
