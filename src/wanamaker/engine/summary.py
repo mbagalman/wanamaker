@@ -100,6 +100,12 @@ class PredictiveSummary:
     hdi_high: list[float]
     interval_mass: float = 0.95
     """Probability mass of the HDI. Must be 0.95 for all v1 outputs (FR-3.1)."""
+    draws: list[list[float]] | None = None
+    """Raw posterior predictive draws, shape ``(n_draws, n_periods)``.
+
+    Included so downstream consumers (like risk-adjusted allocation) can compute
+    tail risks (e.g. CVaR, P_loss) without dropping back to engine-native code.
+    """
 
 
 @dataclass(frozen=True)

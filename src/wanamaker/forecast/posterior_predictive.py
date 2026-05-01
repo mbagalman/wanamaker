@@ -35,7 +35,11 @@ class PosteriorPredictiveEngine(Protocol):
         new_data: pd.DataFrame,
         seed: int,
     ) -> PredictiveSummary:
-        """Draw target samples for ``new_data`` using ``posterior_summary`` context."""
+        """Draw target samples for ``new_data`` using ``posterior_summary`` context.
+
+        The returned ``PredictiveSummary`` must include the per-draw outcome matrix
+        in its ``draws`` field with shape ``(n_draws, n_periods)``.
+        """
         ...
 
 

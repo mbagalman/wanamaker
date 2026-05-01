@@ -200,7 +200,19 @@ class PyMCEngine:
         self, raw: PyMCRawPosterior, seed: int
     ) -> PredictiveSummary:
         pm, az, _, _ = _require_pymc_stack()
+        # Restore training data coordinates and data in case the model was
+        # mutated by a previous forecast call.
+        n_periods = raw.idata.posterior.sizes.get(_TIME_COORD_NAME, 0)
+        coord_updates = {_TIME_COORD_NAME: np.arange(n_periods, dtype=np.int64)}
+        data_updates = {}
+        for var_name in raw.idata.constant_data:
+            data_updates[var_name] = raw.idata.constant_data[var_name].values
+        # Add target data explicitly (size must match coordinates)
+        data_updates[_TARGET_DATA_NAME] = np.zeros(n_periods, dtype=np.float64)
+
         with raw.model:
+            if data_updates:
+                pm.set_data(data_updates, coords=coord_updates)
             ppc = pm.sample_posterior_predictive(
                 raw.idata,
                 var_names=["target"],
@@ -220,6 +232,7 @@ class PyMCEngine:
             hdi_low=hdi[:, 0].tolist(),
             hdi_high=hdi[:, 1].tolist(),
             interval_mass=INTERVAL_MASS,
+            draws=target.tolist(),
         )
 
     def _posterior_predictive_forecast(
@@ -269,6 +282,7 @@ class PyMCEngine:
             hdi_low=hdi[:, 0].tolist(),
             hdi_high=hdi[:, 1].tolist(),
             interval_mass=INTERVAL_MASS,
+            draws=target.tolist(),
         )
 
     def load_posterior(
@@ -854,6 +868,7 @@ def _in_sample_predictive_summary(
         hdi_low=hdi[:, 0].tolist(),
         hdi_high=hdi[:, 1].tolist(),
         interval_mass=INTERVAL_MASS,
+        draws=target.tolist(),
     )
 
 
