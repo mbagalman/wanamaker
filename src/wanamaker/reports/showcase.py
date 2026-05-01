@@ -29,6 +29,7 @@ from wanamaker.refresh.classify import MovementClass, unexplained_fraction
 from wanamaker.refresh.diff import RefreshDiff
 from wanamaker.reports._charts import (
     contribution_bars_svg,
+    response_curves_svg,
     roi_dotplot_svg,
     scenario_delta_svg,
 )
@@ -221,6 +222,9 @@ def build_showcase_context(
         _refresh_narrative(refresh_diff) if refresh_diff is not None else None
     )
 
+    response_curve_channels = _response_curve_channels(summary, exec_ctx["channels"])
+    response_curves_chart_svg = response_curves_svg(response_curve_channels)
+
     return {
         # Header / footer.
         "title": title,
@@ -245,11 +249,44 @@ def build_showcase_context(
         # Charts.
         "contribution_chart_svg": contribution_bars_svg(exec_ctx["channels"]),
         "roi_chart_svg": roi_dotplot_svg(exec_ctx["channels"]),
+        "response_curves_chart_svg": response_curves_chart_svg,
         "scenario_chart_svg": scenario_chart_svg,
         # Optional sections.
         "scenario": scenario_block,
         "refresh_narrative": refresh_narrative,
     }
+
+
+def _response_curve_channels(
+    summary: PosteriorSummary,
+    channels: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Join channel summaries with their saturation parameters from ``summary.parameters``.
+
+    The PyMC engine emits parameters with stable names like
+    ``channel.<name>.half_life``, ``channel.<name>.ec50``,
+    ``channel.<name>.slope``, and ``channel.<name>.coefficient`` (see
+    ``ParameterSummary.name`` in ``engine.summary``). Look those up by
+    channel name; channels missing any of the four are passed through and
+    the chart helper falls back to the spend-invariant rendering for them.
+    """
+    by_name: dict[str, float] = {}
+    for p in summary.parameters:
+        by_name[p.name] = float(p.mean)
+
+    enriched: list[dict[str, Any]] = []
+    for ch in channels:
+        name = ch["name"]
+        enriched.append(
+            {
+                **ch,
+                "half_life": by_name.get(f"channel.{name}.half_life"),
+                "ec50": by_name.get(f"channel.{name}.ec50"),
+                "slope": by_name.get(f"channel.{name}.slope"),
+                "coefficient": by_name.get(f"channel.{name}.coefficient"),
+            }
+        )
+    return enriched
 
 
 def _read_stylesheet() -> str:

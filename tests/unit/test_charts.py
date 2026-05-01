@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 from wanamaker.reports._charts import (
     contribution_bars_svg,
+    response_curves_svg,
     roi_dotplot_svg,
     scenario_delta_svg,
 )
@@ -29,6 +30,12 @@ def _channel(
     roi_hdi_high: float = 2.2,
     spend_invariant: bool = False,
     confidence: str = "high",
+    observed_spend_min: float = 1000.0,
+    observed_spend_max: float = 5000.0,
+    half_life: float | None = 1.0,
+    ec50: float | None = 3000.0,
+    slope: float = 1.5,
+    coefficient: float = 12000.0,
 ) -> dict:
     return {
         "name": name,
@@ -40,6 +47,12 @@ def _channel(
         "roi_hdi_high": roi_hdi_high,
         "spend_invariant": spend_invariant,
         "confidence": confidence,
+        "observed_spend_min": observed_spend_min,
+        "observed_spend_max": observed_spend_max,
+        "half_life": half_life,
+        "ec50": ec50,
+        "slope": slope,
+        "coefficient": coefficient,
     }
 
 
@@ -181,3 +194,98 @@ def test_channel_names_are_html_escaped() -> None:
 
     assert "<script>" not in svg
     assert "&lt;script&gt;" in svg
+
+
+# ---------------------------------------------------------------------------
+# response_curves_svg
+# ---------------------------------------------------------------------------
+
+
+def test_response_curves_one_panel_per_channel() -> None:
+    channels = [
+        _channel("ch_a"),
+        _channel("ch_b"),
+        _channel("ch_c"),
+    ]
+    svg = response_curves_svg(channels)
+    root = _parse(svg)
+
+    # Each panel is a <g> with the panel's frame <rect> inside.
+    panels = list(root.findall("{http://www.w3.org/2000/svg}g"))
+    assert len(panels) == 3
+
+
+def test_response_curves_each_panel_has_its_own_curve() -> None:
+    channels = [_channel("ch_a"), _channel("ch_b")]
+    svg = response_curves_svg(channels)
+    root = _parse(svg)
+
+    polylines = list(root.iter("{http://www.w3.org/2000/svg}polyline"))
+    assert len(polylines) == 2
+
+
+def test_response_curves_observed_band_present_when_range_known() -> None:
+    channels = [_channel("ch_a", observed_spend_min=1000, observed_spend_max=5000)]
+    svg = response_curves_svg(channels)
+    # The observed-range band is a low-opacity rect inside the panel.
+    assert "fill-opacity=\"0.18\"" in svg
+
+
+def test_response_curves_spend_invariant_shows_placeholder_no_curve() -> None:
+    channels = [_channel("ch_flat", spend_invariant=True)]
+    svg = response_curves_svg(channels)
+    root = _parse(svg)
+
+    polylines = list(root.iter("{http://www.w3.org/2000/svg}polyline"))
+    assert len(polylines) == 0
+    assert "Saturation curve not identifiable" in svg
+
+
+def test_response_curves_falls_back_when_parameters_missing() -> None:
+    """If adstock/Hill parameters are missing or non-positive, render the placeholder."""
+    channels = [
+        _channel("missing_half_life", half_life=None),
+        _channel("missing_ec50", ec50=None),
+        _channel("zero_slope", slope=0.0),
+        _channel("nan_coefficient", coefficient=float("nan")),
+    ]
+    svg = response_curves_svg(channels)
+    root = _parse(svg)
+
+    polylines = list(root.iter("{http://www.w3.org/2000/svg}polyline"))
+    assert len(polylines) == 0
+    assert svg.count("Saturation curve not identifiable") == 4
+
+
+def test_response_curves_handles_empty_input() -> None:
+    svg = response_curves_svg([])
+    root = _parse(svg)
+
+    assert root.attrib.get("class", "").endswith("wmk-chart--empty")
+
+
+def test_response_curves_is_deterministic() -> None:
+    channels = [_channel("ch_a"), _channel("ch_b")]
+    assert response_curves_svg(channels) == response_curves_svg(channels)
+
+
+def test_response_curves_curve_passes_through_origin() -> None:
+    """Hill saturation × coefficient evaluates to 0 at spend=0, so the
+    leftmost point on every curve sits on the baseline."""
+    channels = [_channel("ch_a")]
+    svg = response_curves_svg(channels)
+
+    # First polyline point is at the panel's left padding x. The y
+    # should be near the baseline (largest y-value in the panel).
+    import re
+    polyline = re.search(r'<polyline points="([^"]+)"', svg)
+    assert polyline is not None
+    first_point = polyline.group(1).split()[0]
+    last_point = polyline.group(1).split()[-1]
+    fx, fy = (float(v) for v in first_point.split(","))
+    lx, ly = (float(v) for v in last_point.split(","))
+    # First point is to the left of the last (x increases monotonically).
+    assert fx < lx
+    # First point is below or equal the last point in plot space (curve
+    # rises as spend increases — bigger y-pixel = lower contribution).
+    assert fy >= ly

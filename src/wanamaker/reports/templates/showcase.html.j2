@@ -141,6 +141,19 @@
   {{ roi_chart_svg | safe }}
 </section>
 
+<section id="response-curves">
+  <h2>Response curves</h2>
+  <p class="wmk-chart-caption">
+    Each panel shows the channel's mean diminishing-returns curve.
+    The shaded vertical band marks the spend range observed during
+    training; the curve to the right of the band is extrapolation and
+    should be treated as a hypothesis, not a forecast. Channels whose
+    saturation could not be estimated from data appear with a note in
+    place of a curve.
+  </p>
+  {{ response_curves_chart_svg | safe }}
+</section>
+
 {% if scenario %}
 <section id="scenario">
   <h2>Forecast: {{ scenario.plan_name }}</h2>
