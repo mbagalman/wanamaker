@@ -18,10 +18,12 @@ the refresh stability dimension of the Trust Card (FR-4.5).
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class MovementClass(str, Enum):
+class MovementClass(StrEnum):
+    """Business-facing explanation class for one historical estimate movement."""
+
     WITHIN_PRIOR_CI = "within_prior_ci"
     IMPROVED_HOLDOUT = "improved_holdout"
     UNEXPLAINED = "unexplained"

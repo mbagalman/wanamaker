@@ -89,7 +89,7 @@ def compare_scenarios(
     Raises:
         ValueError: If ``plans`` is empty.
         TypeError: If a plan element is not a CSV path or DataFrame.
-        Plus any exception raised by ``forecast()`` for a malformed plan.
+        ValueError: If a plan is malformed or cannot be forecast.
     """
     if not plans:
         raise ValueError("compare_scenarios requires at least one plan")

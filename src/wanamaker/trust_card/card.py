@@ -17,6 +17,8 @@ from enum import StrEnum
 
 
 class TrustStatus(StrEnum):
+    """Discrete credibility status for one Trust Card dimension."""
+
     PASS = "pass"
     MODERATE = "moderate"
     WEAK = "weak"
@@ -24,6 +26,8 @@ class TrustStatus(StrEnum):
 
 @dataclass(frozen=True)
 class TrustDimension:
+    """One named Trust Card dimension and its plain-English explanation."""
+
     name: str
     status: TrustStatus
     explanation: str
@@ -31,6 +35,8 @@ class TrustDimension:
 
 @dataclass(frozen=True)
 class TrustCard:
+    """Collection of Trust Card dimensions for a completed model run."""
+
     dimensions: list[TrustDimension]
 
     def dimension(self, name: str) -> TrustDimension | None:

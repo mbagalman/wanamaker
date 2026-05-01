@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class ReadinessLevel(str, Enum):
+class ReadinessLevel(StrEnum):
     """The four discrete readiness verdicts. Deliberately not a numeric score."""
 
     READY = "ready"
@@ -15,7 +15,9 @@ class ReadinessLevel(str, Enum):
     NOT_RECOMMENDED = "not_recommended"
 
 
-class CheckSeverity(str, Enum):
+class CheckSeverity(StrEnum):
+    """Severity levels emitted by individual readiness checks."""
+
     INFO = "info"
     WARNING = "warning"
     BLOCKER = "blocker"
