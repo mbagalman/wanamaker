@@ -208,9 +208,9 @@ def _generate_lift_test_calibration() -> None:
             "channel": ["paid_search"],
             "test_start": ["2023-09-01"],
             "test_end": ["2023-12-15"],
-            "lift_estimate": [round(true_search_roi, 6)],
-            "ci_lower": [lift_low],
-            "ci_upper": [lift_high],
+            "roi_estimate": [round(true_search_roi, 6)],
+            "roi_ci_lower": [lift_low],
+            "roi_ci_upper": [lift_high],
         }
     )
     lift_tests.to_csv(
@@ -234,9 +234,9 @@ def _generate_lift_test_calibration() -> None:
             "control_columns": [],
             "lift_test_channel": "paid_search",
             "true_roi": true_search_roi,
-            "lift_estimate": round(true_search_roi, 6),
-            "ci_lower": lift_low,
-            "ci_upper": lift_high,
+            "roi_estimate": round(true_search_roi, 6),
+            "roi_ci_lower": lift_low,
+            "roi_ci_upper": lift_high,
             "lift_tests_csv": "lift_test_calibration_lift_tests.csv",
         },
     )

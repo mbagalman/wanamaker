@@ -90,13 +90,13 @@ as a one-row CSV:
 
 ```bash
 cat > tutorial_data/lift_tests.csv <<'EOF'
-channel,test_start,test_end,lift_estimate,ci_lower,ci_upper
+channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper
 paid_social,2024-09-01,2024-10-15,0.38,0.30,0.46
 EOF
 ```
 
 The required columns are `channel`, `test_start`, `test_end`,
-`lift_estimate`, `ci_lower`, `ci_upper`. The CI bounds are converted
+`roi_estimate`, `roi_ci_lower`, `roi_ci_upper`. The CI bounds are converted
 into a Gaussian prior on the channel's effect; tighter bounds put more
 weight on the experiment.
 
