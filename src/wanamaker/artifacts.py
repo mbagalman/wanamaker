@@ -117,38 +117,47 @@ class RunPaths:
 
     @property
     def manifest(self) -> Path:
+        """Path to the run manifest JSON file."""
         return self.root / "manifest.json"
 
     @property
     def config(self) -> Path:
+        """Path to the copied YAML config used for the run."""
         return self.root / "config.yaml"
 
     @property
     def data_hash(self) -> Path:
+        """Path to the text file containing the input data hash."""
         return self.root / "data_hash.txt"
 
     @property
     def posterior(self) -> Path:
+        """Path to the engine-native posterior artifact."""
         return self.root / "posterior.nc"
 
     @property
     def summary(self) -> Path:
+        """Path to the serialized posterior summary JSON file."""
         return self.root / "summary.json"
 
     @property
     def timestamp(self) -> Path:
+        """Path to the text file containing the run timestamp."""
         return self.root / "timestamp.txt"
 
     @property
     def trust_card(self) -> Path:
+        """Path to the serialized Model Trust Card JSON file."""
         return self.root / "trust_card.json"
 
     @property
     def refresh_diff(self) -> Path:
+        """Path to the serialized refresh diff JSON file."""
         return self.root / "refresh_diff.json"
 
     @property
     def engine(self) -> Path:
+        """Path to the text file containing the engine identifier."""
         return self.root / "engine.txt"
 
 
