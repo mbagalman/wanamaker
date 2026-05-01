@@ -114,6 +114,6 @@ class TestLiftTestCalibrationDatasetSchema:
         # The reported lift estimate is the true ROI by construction;
         # validating they round-trip through the metadata + CSV catches a
         # generator that drifts away from the documented contract.
-        assert row["lift_estimate"] == metadata["lift_estimate"]
-        assert row["ci_lower"] <= true_roi <= row["ci_upper"]
+        assert row["roi_estimate"] == metadata["roi_estimate"]
+        assert row["roi_ci_lower"] <= true_roi <= row["roi_ci_upper"]
         assert row["channel"] == metadata["lift_test_channel"]

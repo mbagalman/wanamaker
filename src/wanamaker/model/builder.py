@@ -103,14 +103,14 @@ def _load_lift_test_priors(cfg: WanamakerConfig) -> dict[str, LiftPrior]:
 
     priors: dict[str, LiftPrior] = {}
     for row in lift_tests.itertuples(index=False):
-        interval_width = float(row.ci_upper) - float(row.ci_lower)
+        interval_width = float(row.roi_ci_upper) - float(row.roi_ci_lower)
         sd_roi = interval_width / (2.0 * _NORMAL_95_Z)
         if not math.isfinite(sd_roi) or sd_roi <= 0.0:
             raise ValueError(
                 f"lift-test CSV produced a non-positive prior sd for channel {row.channel!r}"
             )
         priors[str(row.channel)] = LiftPrior(
-            mean_roi=float(row.lift_estimate),
+            mean_roi=float(row.roi_estimate),
             sd_roi=sd_roi,
             confidence=0.95,
         )

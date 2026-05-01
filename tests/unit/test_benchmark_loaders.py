@@ -124,9 +124,9 @@ class TestLiftTestCalibration:
     def test_lift_test_ci_brackets_estimate(self) -> None:
         _, lift_tests, _ = load_lift_test_calibration()
         row = lift_tests.iloc[0]
-        assert row["ci_lower"] <= row["lift_estimate"] <= row["ci_upper"]
+        assert row["roi_ci_lower"] <= row["roi_estimate"] <= row["roi_ci_upper"]
         # Tight CI — keeps the lift-test prior informative.
-        assert (row["ci_upper"] - row["ci_lower"]) < 1.0
+        assert (row["roi_ci_upper"] - row["roi_ci_lower"]) < 1.0
 
 
 class TestTargetLeakage:

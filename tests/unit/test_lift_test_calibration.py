@@ -43,40 +43,40 @@ def _config(tmp_path: Path, lift_test_csv: Path | None = None) -> WanamakerConfi
 def test_load_lift_test_csv_parses_dates_and_numeric_fields(tmp_path: Path) -> None:
     path = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n",
     )
 
     df = load_lift_test_csv(path)
 
-    assert list(df.columns) == [
+    assert set(df.columns) == {
         "channel",
         "test_start",
         "test_end",
-        "lift_estimate",
-        "ci_lower",
-        "ci_upper",
-    ]
+        "roi_estimate",
+        "roi_ci_lower",
+        "roi_ci_upper",
+    }
     assert df.loc[0, "channel"] == "search"
     assert pd.api.types.is_datetime64_any_dtype(df["test_start"])
-    assert df.loc[0, "lift_estimate"] == pytest.approx(2.0)
+    assert df.loc[0, "roi_estimate"] == pytest.approx(2.0)
 
 
 def test_load_lift_test_csv_requires_all_columns(tmp_path: Path) -> None:
     path = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower\n"
         "search,2024-01-01,2024-01-14,2.0,1.2\n",
     )
 
-    with pytest.raises(ValueError, match="missing required columns"):
+    with pytest.raises(ValueError, match="does not match any supported schema"):
         load_lift_test_csv(path)
 
 
 def test_load_lift_test_csv_rejects_duplicate_channel_rows(tmp_path: Path) -> None:
     path = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n"
         "search,2024-02-01,2024-02-14,2.2,1.4,3.0\n",
     )
@@ -88,18 +88,58 @@ def test_load_lift_test_csv_rejects_duplicate_channel_rows(tmp_path: Path) -> No
 def test_load_lift_test_csv_rejects_invalid_interval(tmp_path: Path) -> None:
     path = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,2.8,1.2\n",
     )
 
-    with pytest.raises(ValueError, match="ci_upper <= ci_lower"):
+    with pytest.raises(ValueError, match="roi_ci_upper <= roi_ci_lower"):
+        load_lift_test_csv(path)
+
+
+def test_load_lift_test_csv_warns_on_legacy_schema(tmp_path: Path) -> None:
+    path = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n",
+    )
+
+    with pytest.warns(FutureWarning, match="uses legacy columns"):
+        df = load_lift_test_csv(path)
+
+    assert "roi_estimate" in df.columns
+    assert df.loc[0, "roi_estimate"] == pytest.approx(2.0)
+
+
+def test_load_lift_test_csv_handles_outcome_schema(tmp_path: Path) -> None:
+    path = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,incremental_outcome,incremental_spend,ci_lower_outcome,ci_upper_outcome\n"
+        "search,2024-01-01,2024-01-14,100,50,60,140\n",
+    )
+
+    df = load_lift_test_csv(path)
+
+    assert "roi_estimate" in df.columns
+    assert df.loc[0, "roi_estimate"] == pytest.approx(2.0)
+    assert df.loc[0, "roi_ci_lower"] == pytest.approx(1.2)
+    assert df.loc[0, "roi_ci_upper"] == pytest.approx(2.8)
+
+
+def test_load_lift_test_csv_rejects_mixed_schemas(tmp_path: Path) -> None:
+    path = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper,lift_estimate,ci_lower,ci_upper\n"
+        "search,2024-01-01,2024-01-14,2.0,1.2,2.8,2.0,1.2,2.8\n",
+    )
+
+    with pytest.raises(ValueError, match="mixes multiple schemas"):
         load_lift_test_csv(path)
 
 
 def test_build_model_spec_converts_lift_tests_to_priors(tmp_path: Path) -> None:
     lift_csv = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,1.216014,2.783986\n",
     )
 
@@ -115,7 +155,7 @@ def test_build_model_spec_converts_lift_tests_to_priors(tmp_path: Path) -> None:
 def test_build_model_spec_rejects_lift_test_for_unknown_channel(tmp_path: Path) -> None:
     lift_csv = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "social,2024-01-01,2024-01-14,2.0,1.2,2.8\n",
     )
 
@@ -127,7 +167,7 @@ def test_lift_tests_do_not_modify_adstock_or_saturation_priors(tmp_path: Path) -
     base = build_model_spec(_config(tmp_path))
     lift_csv = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n",
     )
     calibrated = build_model_spec(_config(tmp_path, lift_csv))
@@ -152,7 +192,7 @@ class _FakePM:
 def test_pymc_coefficient_prior_uses_lift_prior_when_present(tmp_path: Path) -> None:
     lift_csv = _write_lift_csv(
         tmp_path,
-        "channel,test_start,test_end,lift_estimate,ci_lower,ci_upper\n"
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,1.216014,2.783986\n",
     )
     spec = build_model_spec(_config(tmp_path, lift_csv))

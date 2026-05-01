@@ -94,7 +94,8 @@ class LiftPrior:
 
     Attributes:
         mean_roi: Point estimate of revenue per unit of spend from the
-            lift test.  Used as the mean of the Normal coefficient prior.
+            lift test (e.g. roi_estimate). Used as the mean of the Normal
+            coefficient prior.
         sd_roi: Standard deviation of the ROI estimate from the lift test.
             Wider intervals result in a less informative calibration prior.
             Must be strictly positive.
