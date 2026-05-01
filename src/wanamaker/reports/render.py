@@ -236,23 +236,34 @@ def build_ramp_recommendation_context(
         "do_not_recommend": "Do not recommend",
     }
     candidates = []
+    recommended_fraction = float(recommendation.recommended_fraction)
     for candidate in recommendation.candidates:
+        failed = list(candidate.failed_gates)
+        extrap_count = len(candidate.extrapolation_flags)
+        is_selected = abs(float(candidate.fraction) - recommended_fraction) < 1e-9
         candidates.append({
             "fraction": float(candidate.fraction),
             "fraction_label": f"{candidate.fraction:.0%}",
             "expected_increment": float(candidate.expected_increment),
+            "expected_lift_label": _signed_int(candidate.expected_increment),
             "probability_positive": float(candidate.probability_positive),
             "probability_material_loss": float(candidate.probability_material_loss),
+            "downside_risk_label": f"{candidate.probability_material_loss:.0%}",
             "q05_increment": float(candidate.q05_increment),
             "cvar_5": float(candidate.cvar_5),
             "largest_move_share": float(candidate.largest_move_share),
             "fractional_kelly": float(candidate.fractional_kelly),
             "passes": bool(candidate.passes),
-            "failed_gates": list(candidate.failed_gates),
+            "failed_gates": failed,
             "failed_gates_label": (
-                ", ".join(candidate.failed_gates) if candidate.failed_gates else "none"
+                ", ".join(failed) if failed else "none"
             ),
-            "extrapolation_count": len(candidate.extrapolation_flags),
+            "extrapolation_count": extrap_count,
+            "historical_support_label": _historical_support_label(failed, extrap_count),
+            "trust_card_gate_label": "fail" if "trust_card" in failed else "pass",
+            "verdict_label": "pass" if candidate.passes else "fail",
+            "is_selected": is_selected,
+            "failure_reasons": _failure_reasons(failed, candidate),
         })
 
     return {
@@ -355,3 +366,76 @@ def _refresh_narrative(refresh_diff: RefreshDiff) -> Mapping[str, Any]:
         "unexplained_fraction": fraction,
         "movements_by_class": classes,
     }
+
+
+# ---------------------------------------------------------------------------
+# Ramp ladder helpers — keep the executive output decision-friendly while
+# preserving the analyst-detail table at the bottom of the report.
+# ---------------------------------------------------------------------------
+
+
+def _signed_int(value: float) -> str:
+    """Format a signed integer with thousands separators (``+1,234`` / ``-1,234``).
+
+    Uses ASCII ``-`` for negatives so the rendered Markdown reads without
+    surprises under any platform encoding (the file lands on Windows
+    runners that default to cp1252, not UTF-8).
+    """
+    rounded = int(round(value))
+    if rounded == 0:
+        return "0"
+    sign = "+" if rounded > 0 else "-"
+    return f"{sign}{abs(rounded):,}"
+
+
+def _historical_support_label(failed_gates: list[str], extrap_count: int) -> str:
+    """Three-bucket plain-English label for the Historical-support column.
+
+    Uses the existing extrapolation gate as the "severe" boundary so the
+    bucket lines up with the gate-failure logic — no new thresholds.
+    """
+    if "extrapolation" in failed_gates:
+        return "severe"
+    if extrap_count > 0:
+        return "mild"
+    return "in range"
+
+
+# Plain-English explanation for each gate name the engine emits.
+_GATE_EXPLANATIONS: dict[str, str] = {
+    "p_positive": "low probability of beating baseline",
+    "p_material_loss": "downside risk too high",
+    "cvar_5": "worst-case tail loss too large",
+    "trust_card": "Trust Card caps the move",
+    "fractional_kelly": "exceeds the risk-adjusted sizing cap",
+    "extrapolation": "exceeds historical spend range",
+}
+
+
+def _failure_reasons(failed_gates: list[str], candidate: Any) -> list[str]:
+    """Plain-English bullet text for each failed gate, with concrete numbers."""
+    if not failed_gates:
+        return []
+    reasons: list[str] = []
+    for gate in failed_gates:
+        base = _GATE_EXPLANATIONS.get(gate, gate)
+        if gate == "p_material_loss":
+            reasons.append(
+                f"{base} ({candidate.probability_material_loss:.0%} chance of "
+                "a material loss)"
+            )
+        elif gate == "p_positive":
+            reasons.append(
+                f"{base} (P(beats baseline) = "
+                f"{candidate.probability_positive:.0%})"
+            )
+        elif gate == "extrapolation":
+            n = len(candidate.extrapolation_flags)
+            reasons.append(f"{base} ({n} cell(s) outside training range)")
+        elif gate == "fractional_kelly":
+            reasons.append(
+                f"{base} (sizing cap = {candidate.fractional_kelly:.0%})"
+            )
+        else:
+            reasons.append(base)
+    return reasons
