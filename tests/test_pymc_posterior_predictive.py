@@ -123,6 +123,17 @@ def test_new_data_returns_predictive_summary_over_plan_periods(fitted_posterior)
     assert result.periods[0].startswith("2024-09")
     assert result.interval_mass == pytest.approx(0.95)
 
+    # Check draws matrix (#64)
+    assert result.draws is not None
+    n_draws = len(result.draws)
+    assert n_draws > 0
+    assert all(len(d) == 4 for d in result.draws)
+
+    # Mean derived from draws must match the summary
+    draws_array = np.array(result.draws)
+    derived_mean = draws_array.mean(axis=0)
+    np.testing.assert_allclose(derived_mean, result.mean, rtol=1e-6)
+
 
 def test_new_data_predictive_is_reproducible_for_same_seed(fitted_posterior) -> None:
     engine, posterior = fitted_posterior
@@ -164,3 +175,5 @@ def test_in_sample_path_still_works(fitted_posterior) -> None:
     result = engine.posterior_predictive(posterior, new_data=None, seed=_FORECAST_SEED)
     assert isinstance(result, PredictiveSummary)
     assert len(result.periods) == 32  # toy dataset length
+    assert result.draws is not None
+    assert all(len(d) == 32 for d in result.draws)
