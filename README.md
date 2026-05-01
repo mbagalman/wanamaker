@@ -44,13 +44,16 @@ Wanamaker sits in the gap.
 
 ## One-command end-to-end example
 
-> *To be wired up at the end of Phase 1. The intended shape:*
-
 ```bash
 pip install wanamaker
 wanamaker run --example public_benchmark
-# → produces an executive summary in under 5 minutes
 ```
+
+That's the whole thing. The command runs the readiness diagnostic, fits a
+quick-mode Bayesian model on the bundled `public_benchmark` dataset, and
+prints the executive summary plus the Model Trust Card. The full report
+is also written to `.wanamaker/runs/<run_id>/report.md`. Expect a few
+minutes on a modern laptop.
 
 ## Reading order
 

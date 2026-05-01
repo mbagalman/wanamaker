@@ -7,6 +7,22 @@ The goal is to go from installation to a first Markdown report. The report is
 not a final business recommendation by itself. It is the starting point for
 reading channel estimates, uncertainty, and the Trust Card.
 
+## The 30-second version
+
+If you just want to see Wanamaker run end-to-end on the public example:
+
+```bash
+pip install wanamaker
+wanamaker run --example public_benchmark
+```
+
+That command chains the readiness diagnostic, a quick-mode fit, and the
+report rendering on a dataset shipped inside the package. It prints the
+executive summary plus the Model Trust Card to stdout and saves the full
+report under `.wanamaker/runs/<run_id>/report.md`. The rest of this page
+walks through the same steps individually so you can see what each one
+does and how they map to your own data.
+
 ## What You Need
 
 - Python 3.11 or newer

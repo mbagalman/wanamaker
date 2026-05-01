@@ -415,6 +415,126 @@ def report(
     typer.echo(typer.style(f"Report saved: {output_path}", fg=typer.colors.GREEN))
 
 
+_RUN_EXAMPLES: tuple[str, ...] = ("public_benchmark",)
+
+
+@app.command()
+def run(
+    example: str = typer.Option(
+        ...,
+        "--example",
+        help=(
+            "Bundled example to run end-to-end. "
+            f"Choices: {', '.join(_RUN_EXAMPLES)}."
+        ),
+    ),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+) -> None:
+    """One-command end-to-end demo on a bundled example dataset (FR-7.1).
+
+    Chains ``diagnose`` → ``fit`` → ``report`` against an example shipped
+    inside the package itself, so a fresh ``pip install`` is enough to
+    produce an executive summary without any user-supplied data. Quick
+    runtime tier so the whole flow finishes in a few minutes on a
+    laptop.
+    """
+    import importlib.resources
+
+    import yaml as _yaml
+
+    from wanamaker.config import load_config
+
+    if example not in _RUN_EXAMPLES:
+        typer.echo(
+            typer.style(
+                f"Unknown example {example!r}. Available: "
+                f"{', '.join(_RUN_EXAMPLES)}.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # Materialise the bundled config to a stable path inside the
+    # artifact dir, with csv_path and artifact_dir resolved against the
+    # current run. The fit command will copy this file into the run
+    # directory as part of its standard manifest.
+    example_root = importlib.resources.files(
+        f"wanamaker._examples.{example}"
+    )
+    bundled_yaml = example_root.joinpath("public_example.yaml").read_text(
+        encoding="utf-8"
+    )
+    cfg_dict = _yaml.safe_load(bundled_yaml)
+    cfg_dict["data"]["csv_path"] = str(
+        example_root.joinpath(cfg_dict["data"]["csv_path"])
+    )
+    cfg_dict["run"]["artifact_dir"] = str(artifact_dir)
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    materialised_config = artifact_dir / f"_example_{example}_config.yaml"
+    materialised_config.write_text(_yaml.safe_dump(cfg_dict), encoding="utf-8")
+
+    typer.echo(
+        typer.style(
+            f"\n=== wanamaker run --example {example} ===\n",
+            fg=typer.colors.CYAN, bold=True,
+        )
+    )
+
+    typer.echo(
+        typer.style("Step 1/3 · readiness diagnostic", fg=typer.colors.CYAN, bold=True)
+    )
+    cfg = load_config(materialised_config)
+    from wanamaker.data.io import load_input_csv
+    data_for_diagnostic = load_input_csv(cfg.data)
+    _run_diagnostics(data_for_diagnostic, cfg)
+    typer.echo("")
+
+    typer.echo(
+        typer.style("Step 2/3 · fitting model (quick mode)", fg=typer.colors.CYAN, bold=True)
+    )
+    runs_before = _existing_run_ids(artifact_dir)
+    fit(config=materialised_config, skip_validation=False)
+    runs_after = _existing_run_ids(artifact_dir)
+    new_run_ids = sorted(runs_after - runs_before)
+    if not new_run_ids:
+        typer.echo(
+            typer.style(
+                "Error: fit did not produce a new run directory.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    run_id = new_run_ids[-1]
+    typer.echo("")
+
+    typer.echo(
+        typer.style("Step 3/3 · executive summary + Trust Card", fg=typer.colors.CYAN, bold=True)
+    )
+    report(run_id=run_id, artifact_dir=artifact_dir, output=None)
+    typer.echo("")
+
+    report_path = artifact_dir / "runs" / run_id / "report.md"
+    typer.echo(
+        typer.style(f"--- {report_path} ---", fg=typer.colors.CYAN)
+    )
+    typer.echo(report_path.read_text(encoding="utf-8"))
+
+
+def _existing_run_ids(artifact_dir: Path) -> set[str]:
+    """Return the set of run IDs currently under ``artifact_dir/runs/``."""
+    runs_root = artifact_dir / "runs"
+    if not runs_root.exists():
+        return set()
+    return {p.name for p in runs_root.iterdir() if p.is_dir()}
+
+
 @app.command()
 def forecast(
     run_id: str = typer.Option(..., "--run-id"),
