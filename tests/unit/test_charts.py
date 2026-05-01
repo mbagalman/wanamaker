@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 from wanamaker.reports._charts import (
     contribution_bars_svg,
+    contribution_waterfall_svg,
     response_curves_svg,
     roi_dotplot_svg,
     scenario_delta_svg,
@@ -289,3 +290,107 @@ def test_response_curves_curve_passes_through_origin() -> None:
     # First point is below or equal the last point in plot space (curve
     # rises as spend increases — bigger y-pixel = lower contribution).
     assert fy >= ly
+
+
+# ---------------------------------------------------------------------------
+# contribution_waterfall_svg
+# ---------------------------------------------------------------------------
+
+
+def test_waterfall_one_segment_per_channel_plus_baseline() -> None:
+    channels = [
+        _channel("ch_a", contribution_mean=5000),
+        _channel("ch_b", contribution_mean=3000),
+        _channel("ch_c", contribution_mean=1000),
+    ]
+    svg = contribution_waterfall_svg(baseline_total=10000, channels=channels)
+    root = _parse(svg)
+
+    rects = list(root.iter("{http://www.w3.org/2000/svg}rect"))
+    # One rect per channel + one for baseline.
+    assert len(rects) == 4
+
+
+def test_waterfall_skips_baseline_segment_when_zero() -> None:
+    channels = [
+        _channel("ch_a", contribution_mean=5000),
+        _channel("ch_b", contribution_mean=3000),
+    ]
+    svg = contribution_waterfall_svg(baseline_total=0.0, channels=channels)
+    root = _parse(svg)
+
+    rects = list(root.iter("{http://www.w3.org/2000/svg}rect"))
+    assert len(rects) == 2
+    assert ">Baseline<" not in svg
+
+
+def test_waterfall_total_label_is_sum_of_segments() -> None:
+    channels = [
+        _channel("ch_a", contribution_mean=5000),
+        _channel("ch_b", contribution_mean=2500),
+    ]
+    svg = contribution_waterfall_svg(baseline_total=10000, channels=channels)
+    # 10000 + 5000 + 2500 = 17500 -> "Total: 17,500"
+    assert "Total: 17,500" in svg
+
+
+def test_waterfall_drops_zero_or_negative_channels() -> None:
+    """Channels with non-positive contribution don't get a segment."""
+    channels = [
+        _channel("ch_a", contribution_mean=5000),
+        _channel("ch_zero", contribution_mean=0),
+        _channel("ch_neg", contribution_mean=-100),
+    ]
+    svg = contribution_waterfall_svg(baseline_total=10000, channels=channels)
+    root = _parse(svg)
+
+    rects = list(root.iter("{http://www.w3.org/2000/svg}rect"))
+    # baseline + ch_a only.
+    assert len(rects) == 2
+    assert "ch_zero" not in svg
+    assert "ch_neg" not in svg
+
+
+def test_waterfall_handles_empty_input() -> None:
+    svg = contribution_waterfall_svg(baseline_total=0, channels=[])
+    root = _parse(svg)
+    assert root.attrib.get("class", "").endswith("wmk-chart--empty")
+
+
+def test_waterfall_handles_negative_baseline_as_zero() -> None:
+    """A negative baseline shouldn't break the chart — it's treated as 0."""
+    channels = [_channel("ch_a", contribution_mean=5000)]
+    svg = contribution_waterfall_svg(baseline_total=-1000, channels=channels)
+    root = _parse(svg)
+
+    rects = list(root.iter("{http://www.w3.org/2000/svg}rect"))
+    # baseline omitted, just one channel.
+    assert len(rects) == 1
+    assert "Total: 5,000" in svg
+
+
+def test_waterfall_is_deterministic() -> None:
+    channels = [
+        _channel("ch_a", contribution_mean=5000),
+        _channel("ch_b", contribution_mean=3000),
+    ]
+    a = contribution_waterfall_svg(baseline_total=10000, channels=channels)
+    b = contribution_waterfall_svg(baseline_total=10000, channels=channels)
+    assert a == b
+
+
+def test_waterfall_segment_widths_are_proportional() -> None:
+    """A segment that's twice as big should be drawn twice as wide."""
+    import re
+
+    channels = [
+        _channel("ch_a", contribution_mean=4000),
+        _channel("ch_b", contribution_mean=2000),
+    ]
+    svg = contribution_waterfall_svg(baseline_total=0, channels=channels)
+    widths = [
+        float(m) for m in re.findall(r'<rect[^>]*width="([\d.]+)"', svg)
+    ]
+    assert len(widths) == 2
+    # 2:1 ratio between the two channels.
+    assert abs(widths[0] / widths[1] - 2.0) < 0.05

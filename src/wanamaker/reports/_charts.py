@@ -421,6 +421,120 @@ def scenario_delta_svg(
     return "".join(parts)
 
 
+def contribution_waterfall_svg(
+    baseline_total: float,
+    channels: Sequence[dict[str, Any]],
+) -> str:
+    """Horizontal cumulative waterfall: baseline + channels = total.
+
+    The chart answers "where does the revenue come from?" at a glance.
+    Each segment is a contiguous horizontal rectangle; the baseline is
+    rendered in a muted fill and channels in primary blue, with thin
+    white separators so adjacent segments are visually distinct. The
+    rightmost label states the total.
+
+    ``channels`` matches the dicts produced by ``_channel_view`` in
+    ``render.py`` (already pre-ranked by mean contribution). Only
+    ``name`` and ``contribution_mean`` are required; spend-invariant and
+    other fields are ignored — this chart shows headline magnitudes
+    only, not credibility nuance (that lives in the bar chart with HDI
+    whiskers).
+
+    ``baseline_total`` may be 0 or negative; in either case the chart
+    still composes (baseline is omitted or shown with a small placeholder).
+    """
+    channels = [c for c in channels if c.get("contribution_mean", 0.0) > 0]
+    if not channels and baseline_total <= 0:
+        return _empty_chart_svg("No contributions to display.")
+
+    width = 720
+    height = 160
+    top_pad = 40
+    left_pad = 12
+    right_pad = 12
+    bar_h = 36
+    bar_y = top_pad + 18
+    bar_top = bar_y
+    bar_bottom = bar_y + bar_h
+
+    # Total = baseline + channels. Width is scaled so total fills the plot.
+    contribs = [
+        (str(c["name"]), float(c["contribution_mean"])) for c in channels
+    ]
+    total = max(baseline_total, 0.0) + sum(value for _, value in contribs)
+    plot_w = width - left_pad - right_pad
+    if total <= 0:
+        return _empty_chart_svg("No contributions to display.")
+
+    def x_of(running_total: float) -> float:
+        return left_pad + (running_total / total) * plot_w
+
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" '
+        f'aria-label="Contribution waterfall: baseline plus media equals total" '
+        f'class="wmk-chart wmk-chart--waterfall">'
+    )
+
+    segments: list[tuple[str, float, str]] = []
+    if baseline_total > 0:
+        segments.append(("Baseline", float(baseline_total), _MUTED))
+    for name, value in contribs:
+        segments.append((name, value, _PRIMARY))
+
+    running = 0.0
+    for label, value, fill in segments:
+        seg_x = x_of(running)
+        seg_w = (value / total) * plot_w
+        parts.append(
+            f'<rect x="{seg_x:.1f}" y="{bar_top}" '
+            f'width="{max(seg_w, 0.5):.1f}" height="{bar_h}" '
+            f'fill="{fill}"/>'
+        )
+        # Top label: channel name (skip when segment is too narrow).
+        if seg_w >= 36:
+            parts.append(
+                f'<text x="{seg_x + seg_w / 2:.1f}" y="{bar_top - 6:.1f}" '
+                f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="11" '
+                f'font-weight="500" text-anchor="middle">{escape(label)}</text>'
+            )
+        # Bottom label: numeric value (skip when too narrow).
+        if seg_w >= 48:
+            parts.append(
+                f'<text x="{seg_x + seg_w / 2:.1f}" y="{bar_bottom + 14:.1f}" '
+                f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="10" '
+                f'text-anchor="middle">{_fmt_int(value)}</text>'
+            )
+        # Thin white separator between segments.
+        parts.append(
+            f'<line x1="{seg_x + seg_w:.1f}" y1="{bar_top}" '
+            f'x2="{seg_x + seg_w:.1f}" y2="{bar_bottom}" '
+            f'stroke="white" stroke-width="1.5"/>'
+        )
+        running += value
+
+    # Total label at the right end.
+    parts.append(
+        f'<text x="{left_pad + plot_w:.1f}" y="{bar_top - 22:.1f}" '
+        f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="13" '
+        f'font-weight="600" text-anchor="end">'
+        f'Total: {_fmt_int(total)}</text>'
+    )
+
+    # Caption below.
+    parts.append(
+        f'<text x="{left_pad + plot_w / 2:.1f}" y="{height - 8}" '
+        f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+        f'text-anchor="middle">'
+        f'Modelled target = baseline + each channel’s contribution</text>'
+    )
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def response_curves_svg(channels: Sequence[dict[str, Any]]) -> str:
     """Small-multiples grid of saturation curves, one panel per channel.
 

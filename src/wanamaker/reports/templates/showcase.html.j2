@@ -93,6 +93,17 @@
   {% endif %}
 </section>
 
+<section id="contribution-waterfall">
+  <h2>Where the modelled target comes from</h2>
+  <p class="wmk-chart-caption">
+    Cumulative breakdown of the modelled target over the training period.
+    The non-media baseline (intercept and controls) plus each channel's
+    contribution adds up to the total. Channel order matches the
+    contribution table below.
+  </p>
+  {{ waterfall_chart_svg | safe }}
+</section>
+
 <section id="channel-contributions">
   <h2>Channel contributions</h2>
   <p class="wmk-chart-caption">
