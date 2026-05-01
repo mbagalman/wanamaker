@@ -89,6 +89,23 @@ wanamaker compare-scenarios --run-id <run_id> --plans path/to/base.csv --plans p
 | `--seed` | integer | run seed | Override posterior-predictive sampling seed. |
 | `--output` | path | `<run_dir>/scenario_comparison.md` | Markdown scenario report path. |
 
+### `wanamaker recommend-ramp`
+
+Recommend a risk-adjusted staged move from a baseline plan toward a target plan.
+
+```bash
+wanamaker recommend-ramp --run-id <run_id> --baseline path/to/base.csv --target path/to/alt.csv
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--run-id` | string | required | Existing fitted run ID. |
+| `--baseline` | path | required | Current or status-quo future spend plan CSV. |
+| `--target` | path | required | Candidate future spend plan CSV. |
+| `--artifact-dir` | path | `.wanamaker` | Root artifact directory. |
+| `--seed` | integer | run seed | Override posterior-predictive sampling seed. |
+| `--output` | path | `<run_dir>/ramp_<baseline>_to_<target>.md` | Markdown ramp report path. |
+
 ### `wanamaker refresh`
 
 Re-run the model with posterior anchoring against the previous compatible run.
@@ -244,6 +261,8 @@ run:
 ### Forecast
 
 ::: wanamaker.forecast.posterior_predictive
+
+::: wanamaker.forecast.ramp
 
 ::: wanamaker.forecast.scenarios
 

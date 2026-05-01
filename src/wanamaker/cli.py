@@ -7,6 +7,7 @@ Six core commands per FR-6.3:
     wanamaker report --run-id <run_id>
     wanamaker forecast --run-id <run_id> --plan <plan.csv>
     wanamaker compare-scenarios --run-id <run_id> --plans <p1.csv> <p2.csv> ...
+    wanamaker recommend-ramp --run-id <run_id> --baseline <base.csv> --target <alt.csv>
     wanamaker refresh --config <config.yaml>
 
 Per AGENTS.md Hard Rule 1, none of these commands may make outbound
@@ -614,6 +615,89 @@ def compare_scenarios(
 
     output_path = output if output is not None else paths.root / "scenario_comparison.md"
     output_path.write_text(_format_scenario_comparison_markdown(results, run_id))
+    typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
+
+
+@app.command(name="recommend-ramp")
+def recommend_ramp(
+    run_id: str = typer.Option(..., "--run-id"),
+    baseline: Path = typer.Option(..., "--baseline", exists=True),
+    target: Path = typer.Option(..., "--target", exists=True),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    seed: int | None = typer.Option(
+        None,
+        "--seed",
+        help="Override the run's stored seed for posterior-predictive sampling.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help=(
+            "Path to save the Markdown report. "
+            "Default: <run_dir>/ramp_<baseline>_to_<target>.md"
+        ),
+    ),
+) -> None:
+    """Recommend a risk-adjusted ramp from a baseline plan to a target plan."""
+    from wanamaker.artifacts import deserialize_refresh_diff
+    from wanamaker.config import load_config
+    from wanamaker.forecast.ramp import recommend_ramp as run_recommend_ramp
+    from wanamaker.reports import (
+        build_ramp_recommendation_context,
+        render_ramp_recommendation,
+    )
+    from wanamaker.trust_card.compute import build_trust_card
+
+    plan_engine, _, summary, paths, run_seed = _load_run_for_forecast(
+        artifact_dir, run_id
+    )
+    seed_used = seed if seed is not None else run_seed
+
+    refresh_diff = None
+    if paths.refresh_diff.exists():
+        refresh_diff = deserialize_refresh_diff(paths.refresh_diff.read_text())
+
+    cfg = load_config(paths.config)
+    trust_card = build_trust_card(
+        summary,
+        refresh_diff=refresh_diff,
+        lift_test_priors=_load_lift_priors_if_any(cfg),
+    )
+    spend_by_channel = _spend_by_channel_from_training_data(cfg)
+
+    typer.echo(
+        f"Recommending ramp from {baseline} to {target} "
+        f"with run {run_id} (seed={seed_used})..."
+    )
+    recommendation = run_recommend_ramp(
+        summary,
+        baseline,
+        target,
+        seed_used,
+        plan_engine,
+        trust_card=trust_card,
+    )
+
+    _print_ramp_recommendation(recommendation)
+    advisor_handoff = _ramp_advisor_handoff(
+        recommendation, summary, spend_by_channel=spend_by_channel,
+    )
+
+    output_path = output if output is not None else (
+        paths.root / f"ramp_{baseline.stem}_to_{target.stem}.md"
+    )
+    context = build_ramp_recommendation_context(
+        recommendation,
+        run_id=run_id,
+        baseline_path=baseline,
+        target_path=target,
+        advisor_handoff=advisor_handoff,
+    )
+    output_path.write_text(render_ramp_recommendation(context), encoding="utf-8")
     typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
 
 
@@ -1455,6 +1539,64 @@ def _format_scenario_comparison_markdown(results: list[Any], run_id: str) -> str
                     )
         lines.append("")
     return "\n".join(lines) + "\n"
+
+
+def _print_ramp_recommendation(recommendation: Any) -> None:
+    """Print the ramp recommendation as a compact human-readable table."""
+    typer.echo("\nRisk-adjusted ramp recommendation")
+    typer.echo(f"  Verdict: {recommendation.status}")
+    typer.echo(f"  Recommended ramp: {recommendation.recommended_fraction:.0%}")
+    typer.echo(f"  {recommendation.explanation}")
+    if recommendation.blocking_reason:
+        typer.echo(f"  Blocking reason: {recommendation.blocking_reason}")
+
+    if not recommendation.candidates:
+        return
+
+    typer.echo("")
+    typer.echo(
+        f"  {'Ramp':<8} {'Pass':<6} {'Expected inc.':>14} "
+        f"{'P(improve)':>12} {'P(loss)':>10} {'Failed gates':<28}"
+    )
+    for candidate in recommendation.candidates:
+        failed = ", ".join(candidate.failed_gates) if candidate.failed_gates else "none"
+        typer.echo(
+            f"  {candidate.fraction:<8.0%} {str(candidate.passes):<6} "
+            f"{candidate.expected_increment:>14,.0f} "
+            f"{candidate.probability_positive:>12.0%} "
+            f"{candidate.probability_material_loss:>10.0%} "
+            f"{failed:<28}"
+        )
+
+
+def _ramp_advisor_handoff(
+    recommendation: Any,
+    summary: Any,
+    *,
+    spend_by_channel: dict[str, float] | None = None,
+) -> str | None:
+    """Return an Experiment Advisor handoff for evidence-bound ramp outcomes."""
+    if recommendation.status != "test_first" or recommendation.blocking_reason:
+        return None
+
+    from wanamaker.advisor import flag_channels
+
+    try:
+        flags = flag_channels(summary, spend_by_channel=spend_by_channel)
+    except NotImplementedError:
+        flags = []
+
+    if flags:
+        channel = flags[0].channel
+    else:
+        contributions = list(getattr(summary, "channel_contributions", []) or [])
+        if not contributions:
+            return (
+                "A controlled test would most reduce the binding gate for this "
+                "recommendation."
+            )
+        channel = max(contributions, key=lambda c: c.mean_contribution).channel
+    return f"A test on `{channel}` would most reduce the binding gate."
 
 
 def _load_lift_priors_if_any(cfg: Any) -> Any:
