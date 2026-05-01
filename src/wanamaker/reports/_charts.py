@@ -28,6 +28,16 @@ _MODERATE = "#d97706"
 _WEAK = "#dc2626"
 _GRID = "#e2e8f0"
 
+# Distinct lines for overlay charts. First entry is the canonical primary so
+# single-scenario overlays look identical to the legacy one-scenario chart.
+_SCENARIO_PALETTE = (
+    "#2b5876",   # primary deep blue
+    "#c2410c",   # burnt orange
+    "#15803d",   # forest green
+    "#7c3aed",   # violet
+    "#0891b2",   # cyan
+)
+
 # Fonts: stack of system fonts. No external font files.
 _FONT_FAMILY = (
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
@@ -411,6 +421,173 @@ def scenario_delta_svg(
     )
 
     # Y-axis label.
+    parts.append(
+        f'<text x="{left_pad}" y="{height - 12}" '
+        f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+        f'text-anchor="start">Period</text>'
+    )
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def multi_scenario_overlay_svg(scenarios: Sequence[dict[str, Any]]) -> str:
+    """Overlay 1–N forecast scenarios on a single mean+HDI chart.
+
+    Each scenario dict must include:
+      - ``name``: str (shown in the legend)
+      - ``periods``: list[str]
+      - ``mean``: list[float]
+      - ``hdi_low``: list[float]
+      - ``hdi_high``: list[float]
+
+    All scenarios must share the same period labels in the same order;
+    that's the realistic case for compared plans against the same fitted
+    model. When period lists differ the chart degrades to an empty
+    placeholder rather than guessing alignment.
+
+    Up to ``len(_SCENARIO_PALETTE)`` scenarios get distinct colors;
+    additional ones cycle. With one scenario the result is visually
+    equivalent to ``scenario_delta_svg`` so this helper is safe to use
+    as a drop-in replacement.
+    """
+    if not scenarios:
+        return _empty_chart_svg("No forecast available.")
+
+    # Validate alignment: all scenarios must share identical period labels.
+    base_periods = list(scenarios[0]["periods"])
+    n = len(base_periods)
+    if n == 0:
+        return _empty_chart_svg("No forecast available.")
+    for s in scenarios:
+        if (
+            list(s["periods"]) != base_periods
+            or len(s["mean"]) != n
+            or len(s["hdi_low"]) != n
+            or len(s["hdi_high"]) != n
+        ):
+            return _empty_chart_svg(
+                "Forecast scenarios must share the same period labels."
+            )
+
+    width = 720
+    height = 300
+    top_pad = 56  # extra room for the legend
+    bottom_pad = 48
+    left_pad = 80
+    right_pad = 24
+
+    plot_width = width - left_pad - right_pad
+    plot_height = height - top_pad - bottom_pad
+
+    y_min = min(min(s["hdi_low"]) for s in scenarios)
+    y_max = max(max(s["hdi_high"]) for s in scenarios)
+    if y_max == y_min:
+        y_max = y_min + 1.0
+    y_pad = (y_max - y_min) * 0.05
+    y_min -= y_pad
+    y_max += y_pad
+
+    def x(i: int) -> float:
+        if n == 1:
+            return left_pad + plot_width / 2
+        return left_pad + (i / (n - 1)) * plot_width
+
+    def y(value: float) -> float:
+        return top_pad + (1.0 - (value - y_min) / (y_max - y_min)) * plot_height
+
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" '
+        f'aria-label="Forecast comparison across {len(scenarios)} scenario(s)" '
+        f'class="wmk-chart wmk-chart--scenario-overlay">'
+    )
+
+    # Y-axis grid + labels.
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        gy = top_pad + (1 - frac) * plot_height
+        gv = y_min + frac * (y_max - y_min)
+        parts.append(
+            f'<line x1="{left_pad}" y1="{gy:.1f}" '
+            f'x2="{left_pad + plot_width}" y2="{gy:.1f}" '
+            f'stroke="{_GRID}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{left_pad - 8}" y="{gy + 4:.1f}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="end">{_fmt_int(gv)}</text>'
+        )
+
+    # Legend at the top-left of the plot.
+    legend_y = top_pad - 26
+    legend_x = left_pad
+    for idx, scenario in enumerate(scenarios):
+        color = _SCENARIO_PALETTE[idx % len(_SCENARIO_PALETTE)]
+        # Color swatch
+        parts.append(
+            f'<rect x="{legend_x:.1f}" y="{legend_y:.1f}" '
+            f'width="14" height="3" fill="{color}"/>'
+        )
+        # Label
+        parts.append(
+            f'<text x="{legend_x + 20:.1f}" y="{legend_y + 5:.1f}" '
+            f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="start">{escape(str(scenario["name"]))}</text>'
+        )
+        # Advance: swatch (14) + gap (6) + name width (estimated) + spacing.
+        # Use a heuristic 7 px per char so labels don't collide too often.
+        legend_x += 14 + 6 + 7 * len(str(scenario["name"])) + 18
+
+    # Ribbons first (drawn under the lines), then lines on top.
+    for idx, scenario in enumerate(scenarios):
+        color = _SCENARIO_PALETTE[idx % len(_SCENARIO_PALETTE)]
+        upper = " ".join(
+            f"{x(i):.1f},{y(scenario['hdi_high'][i]):.1f}" for i in range(n)
+        )
+        lower = " ".join(
+            f"{x(i):.1f},{y(scenario['hdi_low'][i]):.1f}"
+            for i in reversed(range(n))
+        )
+        parts.append(
+            f'<polygon points="{upper} {lower}" '
+            f'fill="{color}" fill-opacity="0.15" stroke="none"/>'
+        )
+
+    for idx, scenario in enumerate(scenarios):
+        color = _SCENARIO_PALETTE[idx % len(_SCENARIO_PALETTE)]
+        line_points = " ".join(
+            f"{x(i):.1f},{y(scenario['mean'][i]):.1f}" for i in range(n)
+        )
+        parts.append(
+            f'<polyline points="{line_points}" '
+            f'fill="none" stroke="{color}" stroke-width="2" '
+            f'stroke-linejoin="round"/>'
+        )
+
+    # X-axis: first / midpoint / last period labels.
+    indices = [0, n - 1]
+    if n > 2:
+        indices.insert(1, n // 2)
+    seen = set()
+    for i in indices:
+        if i in seen:
+            continue
+        seen.add(i)
+        label_x = x(i)
+        parts.append(
+            f'<text x="{label_x:.1f}" y="{height - bottom_pad + 18}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="middle">{escape(str(base_periods[i]))}</text>'
+        )
+
+    # Axis frame.
+    parts.append(
+        f'<line x1="{left_pad}" y1="{top_pad + plot_height}" '
+        f'x2="{left_pad + plot_width}" y2="{top_pad + plot_height}" '
+        f'stroke="{_MUTED}" stroke-width="1"/>'
+    )
     parts.append(
         f'<text x="{left_pad}" y="{height - 12}" '
         f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '

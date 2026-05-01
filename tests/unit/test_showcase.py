@@ -396,10 +396,91 @@ def test_scenario_section_appears_when_forecast_supplied() -> None:
     )
 
     assert 'id="scenario"' in html
-    assert "wmk-chart--scenario" in html
+    assert "wmk-chart--scenario-overlay" in html
     assert "q1_plan" in html
     assert "Extrapolation warning" in html
     assert "paid_search" in html
+
+
+def test_multiple_scenarios_render_comparison_table_and_overlay() -> None:
+    """Two scenarios: overlay chart + table with deltas vs the first plan."""
+    summary = _summary(
+        _channel("paid_search", spend_min=100.0, spend_max=500.0)
+    )
+    card = _card(("convergence", TrustStatus.PASS, "OK."))
+    periods = ["2026-01-05", "2026-01-12", "2026-01-19"]
+    baseline = ForecastResult(
+        periods=periods,
+        mean=[1000.0, 1100.0, 1050.0],
+        hdi_low=[900.0, 980.0, 940.0],
+        hdi_high=[1100.0, 1220.0, 1160.0],
+        extrapolation_flags=[],
+        spend_invariant_channels=[],
+    )
+    alternative = ForecastResult(
+        periods=periods,
+        mean=[1100.0, 1200.0, 1150.0],
+        hdi_low=[1000.0, 1080.0, 1040.0],
+        hdi_high=[1200.0, 1320.0, 1260.0],
+        extrapolation_flags=[],
+        spend_invariant_channels=[],
+    )
+    html = _render(
+        summary,
+        card,
+        scenarios=[baseline, alternative],
+        scenario_plan_names=["base", "alt"],
+    )
+
+    assert 'id="scenario"' in html
+    assert "wmk-chart--scenario-overlay" in html
+    # Both plans appear in the legend / table.
+    assert "base" in html
+    assert "alt" in html
+    # Comparison table is present with both rows.
+    assert "Predicted total" in html
+    assert "Δ vs first plan" in html
+    # Delta for the second row is +300 (3300 alt total − 3150 baseline total).
+    assert "+300" in html or "+ 300" in html
+
+
+def test_legacy_and_new_scenario_apis_can_be_combined() -> None:
+    """Passing scenario_forecast (legacy) and scenarios= (new) concatenates them.
+
+    The legacy entry comes first and acts as the baseline for the delta
+    column, matching the documented "first plan = baseline" rule.
+    """
+    summary = _summary(
+        _channel("paid_search", spend_min=100.0, spend_max=500.0)
+    )
+    card = _card(("convergence", TrustStatus.PASS, "OK."))
+    periods = ["2026-01-05", "2026-01-12"]
+
+    def fr(mean: float) -> ForecastResult:
+        return ForecastResult(
+            periods=periods,
+            mean=[mean, mean],
+            hdi_low=[mean - 100, mean - 100],
+            hdi_high=[mean + 100, mean + 100],
+            extrapolation_flags=[],
+            spend_invariant_channels=[],
+        )
+
+    html = _render(
+        summary,
+        card,
+        scenario_forecast=fr(1000),
+        scenario_plan_name="legacy_first",
+        scenarios=[fr(1200)],
+        scenario_plan_names=["new_second"],
+    )
+
+    assert "legacy_first" in html
+    assert "new_second" in html
+    # Legacy shows up first; "Δ vs first plan" reads against it.
+    legacy_idx = html.index("legacy_first")
+    new_idx = html.index("new_second")
+    assert legacy_idx < new_idx
 
 
 def test_refresh_section_appears_when_diff_supplied() -> None:

@@ -30,9 +30,9 @@ from wanamaker.refresh.diff import RefreshDiff
 from wanamaker.reports._charts import (
     contribution_bars_svg,
     contribution_waterfall_svg,
+    multi_scenario_overlay_svg,
     response_curves_svg,
     roi_dotplot_svg,
-    scenario_delta_svg,
 )
 from wanamaker.reports.render import (
     build_executive_summary_context,
@@ -158,6 +158,62 @@ def _scenario_block(
     }
 
 
+def _scenarios_block(
+    forecasts: list[ForecastResult],
+    plan_names: list[str],
+) -> dict[str, Any] | None:
+    """Build the multi-scenario context: per-scenario series, comparison table.
+
+    The first entry is treated as the baseline for delta computation in the
+    table; subsequent rows show ``mean_total − baseline_mean_total``. With
+    a single scenario the comparison table just shows that one row and the
+    delta column reads zero.
+    """
+    if not forecasts:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    series: list[dict[str, Any]] = []
+    aggregated_extrap: dict[str, set[str]] = {}
+    for name, forecast in zip(plan_names, forecasts, strict=True):
+        block = _scenario_block(forecast, plan_name=name, baseline_total=None)
+        rows.append(
+            {
+                "plan_name": block["plan_name"],
+                "mean_total": block["mean_total"],
+                "hdi_low_total": block["hdi_low_total"],
+                "hdi_high_total": block["hdi_high_total"],
+                "extrapolation_count": len(block["extrapolation_warnings"]),
+            }
+        )
+        series.append(
+            {
+                "name": block["plan_name"],
+                "periods": block["periods"],
+                "mean": block["mean"],
+                "hdi_low": block["hdi_low"],
+                "hdi_high": block["hdi_high"],
+            }
+        )
+        aggregated_extrap[block["plan_name"]] = set(block["extrapolation_warnings"])
+
+    baseline_mean = rows[0]["mean_total"] if rows else 0.0
+    for row in rows:
+        row["delta_vs_baseline"] = row["mean_total"] - baseline_mean
+
+    # Sorted alphabetically by channel for stable rendering across runs.
+    extrap_summary = sorted({c for cs in aggregated_extrap.values() for c in cs})
+
+    return {
+        "rows": rows,
+        "series": series,
+        "any_extrapolation": bool(extrap_summary),
+        "extrapolation_warnings": extrap_summary,
+        # Convenience for the single-scenario prose paragraph.
+        "single": rows[0] if len(rows) == 1 else None,
+    }
+
+
 def build_showcase_context(
     summary: PosteriorSummary,
     trust_card: TrustCard,
@@ -173,7 +229,8 @@ def build_showcase_context(
     refresh_diff: RefreshDiff | None = None,
     scenario_forecast: ForecastResult | None = None,
     scenario_plan_name: str | None = None,
-    baseline_total: float | None = None,
+    scenarios: Iterable[ForecastResult] | None = None,
+    scenario_plan_names: Iterable[str] | None = None,
     advisor_recommendations: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Shape every input the showcase template needs.
@@ -182,6 +239,12 @@ def build_showcase_context(
     fields and trust-card per-channel saturation rendering, then adds the
     showcase-only chrome (verdict pill, decision notes, charts, footer
     metadata).
+
+    Scenario inputs accept either the legacy single-scenario form
+    (``scenario_forecast`` + ``scenario_plan_name``) or a list
+    (``scenarios`` + ``scenario_plan_names``). The two are concatenated;
+    the first entry in the resulting list is treated as the baseline for
+    the comparison table's delta column.
     """
     exec_ctx = build_executive_summary_context(
         summary,
@@ -204,20 +267,28 @@ def build_showcase_context(
         for d in trust_ctx["dimensions"]
     ]
 
-    scenario_block: dict[str, Any] | None = None
-    scenario_chart_svg = ""
+    forecasts_list: list[ForecastResult] = []
+    names_list: list[str] = []
     if scenario_forecast is not None:
-        scenario_block = _scenario_block(
-            scenario_forecast,
-            plan_name=scenario_plan_name or "scenario",
-            baseline_total=baseline_total,
-        )
-        scenario_chart_svg = scenario_delta_svg(
-            scenario_block["periods"],
-            scenario_block["mean"],
-            scenario_block["hdi_low"],
-            scenario_block["hdi_high"],
-        )
+        forecasts_list.append(scenario_forecast)
+        names_list.append(scenario_plan_name or "scenario")
+    if scenarios is not None:
+        extra_forecasts = list(scenarios)
+        extra_names = list(scenario_plan_names) if scenario_plan_names else []
+        if len(extra_names) < len(extra_forecasts):
+            extra_names += [
+                f"scenario_{i + 1 + len(forecasts_list)}"
+                for i in range(len(extra_names), len(extra_forecasts))
+            ]
+        forecasts_list.extend(extra_forecasts)
+        names_list.extend(extra_names[: len(extra_forecasts)])
+
+    scenario_block = _scenarios_block(forecasts_list, names_list)
+    scenario_chart_svg = (
+        multi_scenario_overlay_svg(scenario_block["series"])
+        if scenario_block is not None
+        else ""
+    )
 
     refresh_narrative = (
         _refresh_narrative(refresh_diff) if refresh_diff is not None else None
@@ -226,9 +297,9 @@ def build_showcase_context(
     response_curve_channels = _response_curve_channels(summary, exec_ctx["channels"])
     response_curves_chart_svg = response_curves_svg(response_curve_channels)
 
-    baseline_total = _baseline_total(summary)
+    non_media_baseline = _baseline_total(summary)
     waterfall_chart_svg = contribution_waterfall_svg(
-        baseline_total, exec_ctx["channels"]
+        non_media_baseline, exec_ctx["channels"]
     )
 
     return {

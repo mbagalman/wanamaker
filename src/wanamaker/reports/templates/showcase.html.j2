@@ -167,25 +167,60 @@
 
 {% if scenario %}
 <section id="scenario">
-  <h2>Forecast: {{ scenario.plan_name }}</h2>
+  {% if scenario.single %}
+  <h2>Forecast: {{ scenario.single.plan_name }}</h2>
   <p class="wmk-prose">
     Predicted total over the plan window:
-    <strong>{{ "{:,.0f}".format(scenario.mean_total) }}</strong>
+    <strong>{{ "{:,.0f}".format(scenario.single.mean_total) }}</strong>
     (95% credible interval
-    {{ "{:,.0f}".format(scenario.hdi_low_total) }}–{{ "{:,.0f}".format(scenario.hdi_high_total) }}).
-    {% if scenario.baseline_total is not none %}
-    That is a change of <strong>{{ "{:+,.0f}".format(scenario.delta) }}</strong>
-    versus the baseline plan.
-    {% endif %}
+    {{ "{:,.0f}".format(scenario.single.hdi_low_total) }}–{{ "{:,.0f}".format(scenario.single.hdi_high_total) }}).
   </p>
-  {{ scenario_chart_svg | safe }}
-  {% if scenario.extrapolation_warnings %}
+  {% else %}
+  <h2>Forecast comparison</h2>
   <p class="wmk-prose">
-    <strong>Extrapolation warning:</strong> the following channels exceed the
-    spend range observed during training and the model has no direct
-    evidence at those levels —
+    {{ scenario.rows | length }} plans compared. Delta is each plan's
+    predicted total minus the first plan's predicted total — read it as
+    <em>"how much more (or less) the model expects from this plan,
+    compared with {{ scenario.rows[0].plan_name }}"</em>.
+  </p>
+  {% endif %}
+
+  {{ scenario_chart_svg | safe }}
+
+  <table class="wmk-table">
+    <thead>
+      <tr>
+        <th>Plan</th>
+        <th class="wmk-num">Predicted total</th>
+        <th class="wmk-num">95% credible interval</th>
+        <th class="wmk-num">Δ vs first plan</th>
+        <th class="wmk-num">Extrapolation flags</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in scenario.rows %}
+      <tr>
+        <td><code>{{ row.plan_name }}</code></td>
+        <td class="wmk-num">{{ "{:,.0f}".format(row.mean_total) }}</td>
+        <td class="wmk-num">
+          {{ "{:,.0f}".format(row.hdi_low_total) }}–{{ "{:,.0f}".format(row.hdi_high_total) }}
+        </td>
+        <td class="wmk-num">
+          {% if loop.index0 == 0 %}—{% else %}{{ "{:+,.0f}".format(row.delta_vs_baseline) }}{% endif %}
+        </td>
+        <td class="wmk-num">{{ row.extrapolation_count }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if scenario.any_extrapolation %}
+  <p class="wmk-prose">
+    <strong>Extrapolation warning:</strong> one or more plans exceed the
+    spend range observed during training for the following channels —
     {% for w in scenario.extrapolation_warnings %}<code>{{ w }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
-    Treat as a staged-test candidate, not as proof the move is safe.
+    Treat affected rows as staged-test candidates, not as proof the move
+    is safe.
   </p>
   {% endif %}
 </section>
