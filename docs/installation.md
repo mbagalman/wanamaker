@@ -36,7 +36,7 @@ docker run wanamaker/wanamaker wanamaker --help
 - Python 3.11+
 - No R runtime
 - No GPU requirement for v1
-- No network access required for core commands after installation
+- No network access required for core commands after installation (see [Privacy and Data Handling](privacy.md) for details on our local-first guarantees)
 
 ## To Be Completed
 
