@@ -11,6 +11,11 @@ an LLM.
 Templates ship inside this subpackage so the package is self-contained.
 """
 
+from wanamaker.reports.excel import (
+    WorkbookMetadata,
+    build_excel_workbook,
+    write_excel_workbook,
+)
 from wanamaker.reports.render import (
     build_executive_summary_context,
     build_ramp_recommendation_context,
@@ -26,6 +31,8 @@ from wanamaker.reports.trust_card_one_pager import (
 )
 
 __all__ = [
+    "WorkbookMetadata",
+    "build_excel_workbook",
     "build_executive_summary_context",
     "build_ramp_recommendation_context",
     "build_showcase_context",
@@ -36,4 +43,5 @@ __all__ = [
     "render_showcase",
     "render_trust_card",
     "render_trust_card_one_pager",
+    "write_excel_workbook",
 ]

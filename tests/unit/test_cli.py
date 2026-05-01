@@ -22,6 +22,7 @@ def test_help_lists_public_commands() -> None:
         "report",
         "showcase",
         "trust-card",
+        "export",
         "run",
         "forecast",
         "compare-scenarios",
