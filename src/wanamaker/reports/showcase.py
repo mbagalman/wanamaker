@@ -29,6 +29,7 @@ from wanamaker.refresh.classify import MovementClass, unexplained_fraction
 from wanamaker.refresh.diff import RefreshDiff
 from wanamaker.reports._charts import (
     contribution_bars_svg,
+    contribution_waterfall_svg,
     response_curves_svg,
     roi_dotplot_svg,
     scenario_delta_svg,
@@ -225,6 +226,11 @@ def build_showcase_context(
     response_curve_channels = _response_curve_channels(summary, exec_ctx["channels"])
     response_curves_chart_svg = response_curves_svg(response_curve_channels)
 
+    baseline_total = _baseline_total(summary)
+    waterfall_chart_svg = contribution_waterfall_svg(
+        baseline_total, exec_ctx["channels"]
+    )
+
     return {
         # Header / footer.
         "title": title,
@@ -248,6 +254,7 @@ def build_showcase_context(
         "has_invariant_channels": trust_ctx["has_invariant_channels"],
         # Charts.
         "contribution_chart_svg": contribution_bars_svg(exec_ctx["channels"]),
+        "waterfall_chart_svg": waterfall_chart_svg,
         "roi_chart_svg": roi_dotplot_svg(exec_ctx["channels"]),
         "response_curves_chart_svg": response_curves_chart_svg,
         "scenario_chart_svg": scenario_chart_svg,
@@ -255,6 +262,26 @@ def build_showcase_context(
         "scenario": scenario_block,
         "refresh_narrative": refresh_narrative,
     }
+
+
+def _baseline_total(summary: PosteriorSummary) -> float:
+    """Modelled non-media baseline contribution over the training period.
+
+    Computed as ``sum(in_sample_predictive.mean) − sum(channel_contributions)``.
+    For a well-fitted model the predictive sum is the modelled total target
+    over the period; subtracting media yields what the target would have
+    been at baseline (intercept + controls). When the predictive summary
+    is missing or smaller than total media, returns 0.0 — the waterfall
+    chart degrades to a media-only stack.
+    """
+    predictive = summary.in_sample_predictive
+    if predictive is None or not predictive.mean:
+        return 0.0
+    total_predicted = float(sum(predictive.mean))
+    total_media = float(
+        sum(c.mean_contribution for c in summary.channel_contributions)
+    )
+    return max(total_predicted - total_media, 0.0)
 
 
 def _response_curve_channels(

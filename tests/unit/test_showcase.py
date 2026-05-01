@@ -180,6 +180,7 @@ def test_includes_all_required_sections() -> None:
     for section_id in (
         "verdict",
         "executive-summary",
+        "contribution-waterfall",
         "channel-contributions",
         "channel-roi",
         "response-curves",
@@ -209,10 +210,11 @@ def test_charts_inline_as_svg() -> None:
     card = _card(("convergence", TrustStatus.PASS, "OK."))
     html = _render(summary, card)
 
-    # Three SVGs minimum (contribution + ROI + response curves). Scenario
-    # chart only when --scenario is supplied; tested separately.
+    # Four SVGs minimum (waterfall + contribution + ROI + response curves).
+    # Scenario chart only when --scenario is supplied; tested separately.
     svg_count = html.count("<svg")
-    assert svg_count >= 3, f"expected >= 3 inline SVGs, got {svg_count}"
+    assert svg_count >= 4, f"expected >= 4 inline SVGs, got {svg_count}"
+    assert "wmk-chart--waterfall" in html
     assert "wmk-chart--contributions" in html
     assert "wmk-chart--roi" in html
     assert "wmk-chart--response-curves" in html
@@ -261,6 +263,45 @@ def test_verdict_pill_moderate_when_only_moderates() -> None:
 
     assert "wmk-pill--moderate" in html
     assert "Mixed evidence" in html
+
+
+# ---------------------------------------------------------------------------
+# Contribution waterfall
+# ---------------------------------------------------------------------------
+
+
+def test_waterfall_baseline_derived_from_predictive_minus_media() -> None:
+    """Baseline = sum(in_sample_predictive.mean) − sum(channel contributions).
+
+    Here the predictive mean is 100 per period × 3 periods = 300; channel
+    contribution is 5,000. Negative gap is clamped to 0 in the helper, so
+    the waterfall renders media-only.
+    """
+    summary = _summary(_channel("paid_search", contribution=5000.0))
+    card = _card(("convergence", TrustStatus.PASS, "OK."))
+    html = _render(summary, card)
+
+    assert 'id="contribution-waterfall"' in html
+    assert "wmk-chart--waterfall" in html
+    # Predicted total (300) < media (5000), so baseline clamps to 0 and the
+    # waterfall shows only the media segment.
+    assert ">Baseline<" not in html
+    # The total label reflects the visible total (just media in this case).
+    assert "Total: 5,000" in html
+
+
+def test_waterfall_includes_baseline_when_predictive_exceeds_media() -> None:
+    """When predictive > media, the baseline segment shows up."""
+    summary = _summary(
+        _channel("paid_search", contribution=200.0),  # tiny media
+        periods=["2024-01-01", "2024-01-08", "2024-01-15"],
+    )
+    # Predictive mean is 100 per period × 3 = 300; media = 200; baseline = 100.
+    card = _card(("convergence", TrustStatus.PASS, "OK."))
+    html = _render(summary, card)
+
+    assert ">Baseline<" in html
+    assert "Total: 300" in html
 
 
 # ---------------------------------------------------------------------------
