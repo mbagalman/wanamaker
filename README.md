@@ -55,8 +55,16 @@ wanamaker run --example public_benchmark
 That's the whole thing. The command runs the readiness diagnostic, fits a
 quick-mode Bayesian model on the bundled `public_benchmark` dataset, and
 prints the executive summary plus the Model Trust Card. The full report
-is also written to `.wanamaker/runs/<run_id>/report.md`. Expect a few
+is also written to `.wanamaker/runs/<run_id>/report.md`, and an HTML
+showcase suitable for emailing is rendered alongside it. Expect a few
 minutes on a modern laptop.
+
+## Try it without installing
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mbagalman/wanamaker/blob/master/notebooks/quickstart.ipynb)
+
+The same flow runs end-to-end in [a hosted Colab notebook](notebooks/quickstart.ipynb)
+— useful for evaluators who don't want to install PyMC locally first.
 
 ## Reading order
 
