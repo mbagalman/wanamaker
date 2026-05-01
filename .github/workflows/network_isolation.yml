@@ -1,0 +1,55 @@
+name: Network isolation integration
+
+# Runs the six core CLI commands end-to-end inside a fresh network
+# namespace (created via ``unshare --net``) so any non-loopback
+# ``connect()`` syscall from production code, a third-party dep, or a
+# subprocess worker is denied by the kernel itself.
+#
+# Per FR-Privacy.1 / AGENTS.md Hard Rule 1 and the issue #33 cadence
+# notes, this is the runtime complement to the static import-graph
+# guardrail in ``tests/test_no_network_in_core.py``: the static check
+# rejects banned imports cheaply on every PR; the runtime check is
+# slower (a real PyMC fit + the full six-command flow) and runs only on
+# push to master and on release tags so it cannot be quietly bypassed
+# while still keeping PRs fast.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  network-isolation:
+    name: Six-command flow with outbound network blocked
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package + dev deps (includes PyMC)
+        run: pip install -e ".[dev]"
+
+      - name: Sanity check — non-loopback access works pre-isolation
+        run: curl -fsSL --max-time 10 https://pypi.org/ -o /dev/null
+
+      - name: Run six-command flow inside an isolated network namespace
+        run: |
+          set -euo pipefail
+          PYTEST="$(which pytest)"
+          # ``sudo unshare --net`` creates a new network namespace where
+          # only ``lo`` exists (and starts down). We bring lo up so PyMC's
+          # local IPC works, then run the test. The host runner's
+          # network is untouched, so log streaming back to GitHub
+          # Actions still works.
+          sudo unshare --net bash -eu -c "
+            ip link set lo up
+            export WANAMAKER_RUN_ENGINE_TESTS=1
+            \"$PYTEST\" tests/test_network_isolation.py -ra --tb=short -v
+          "
