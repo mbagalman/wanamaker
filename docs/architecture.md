@@ -617,7 +617,8 @@ These are not guidelines -- violating them means rebuilding the project's credib
 - `test_no_network_in_core.py` -- runs on every PR; walks core import graph at import time (fast guardrail)
 - `tests/test_reproducibility.py` -- enabled with `WANAMAKER_RUN_ENGINE_TESTS=1`; fits same benchmark twice with same seed, compares all summary floats within RTOL=1e-6 (numerically close, not necessarily bit-for-bit identical across platforms)
 - Network-isolated integration test -- runs the primary core workflow without network access when engine tests are enabled
-- Cross-platform install test (planned Phase 2) -- clean-environment pip install on Linux, macOS (Intel + ARM), Windows
+- `.github/workflows/install.yml` -- runs on push to master and on release tags; performs a clean-environment `pip install .` and CLI smoke tests on Linux, macOS (Intel + ARM), and Windows
+- `.github/workflows/docker.yml` -- runs on push to master and on release tags; builds the image, asserts the FR-6.2 size ceiling, and runs the bundled one-command demo inside the container
 
 ---
 
