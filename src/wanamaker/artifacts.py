@@ -58,6 +58,9 @@ TRUST_CARD_SCHEMA_VERSION = 1
 REFRESH_DIFF_SCHEMA_VERSION = 1
 """Bump when the refresh_diff.json structure changes in a backward-incompatible way."""
 
+RAMP_RECOMMENDATION_SCHEMA_VERSION = 1
+"""Bump when the ramp_recommendation.json structure changes in a backward-incompatible way."""
+
 
 def _wrap(payload: dict[str, Any], schema_version: int) -> str:
     """Wrap a serialized payload in a versioned envelope and return JSON.
@@ -430,4 +433,67 @@ def deserialize_refresh_diff(json_str: str) -> Any:
         previous_run_id=d["previous_run_id"],
         current_run_id=d["current_run_id"],
         movements=movements,
+    )
+
+
+def serialize_ramp_recommendation(recommendation: Any) -> str:
+    """Serialize a ``RampRecommendation`` to a versioned JSON string.
+
+    Wraps the payload in a versioned envelope so ``deserialize_ramp_recommendation``
+    can detect and reject incompatible artifacts.
+    """
+    return _wrap(dataclasses.asdict(recommendation), RAMP_RECOMMENDATION_SCHEMA_VERSION)
+
+
+def deserialize_ramp_recommendation(json_str: str) -> Any:
+    """Reconstruct a ``RampRecommendation`` from its serialized form.
+
+    Validates the envelope schema version before parsing.
+
+    Args:
+        json_str: Contents of a ``ramp_recommendation.json`` file.
+
+    Returns:
+        A fully populated ``RampRecommendation`` instance.
+
+    Raises:
+        ValueError: If the schema version does not match
+            ``RAMP_RECOMMENDATION_SCHEMA_VERSION``.
+        json.JSONDecodeError: If ``json_str`` is not valid JSON.
+    """
+    from wanamaker.forecast.posterior_predictive import ExtrapolationFlag
+    from wanamaker.forecast.ramp import RampCandidate, RampRecommendation
+
+    d: dict[str, Any] = _unwrap(
+        json_str, RAMP_RECOMMENDATION_SCHEMA_VERSION, "ramp_recommendation.json",
+    )
+    candidates = [
+        RampCandidate(
+            fraction=float(c["fraction"]),
+            total_spend_by_channel={
+                k: float(v) for k, v in c["total_spend_by_channel"].items()
+            },
+            expected_increment=float(c["expected_increment"]),
+            probability_positive=float(c["probability_positive"]),
+            probability_material_loss=float(c["probability_material_loss"]),
+            q05_increment=float(c["q05_increment"]),
+            cvar_5=float(c["cvar_5"]),
+            largest_move_share=float(c["largest_move_share"]),
+            fractional_kelly=float(c["fractional_kelly"]),
+            extrapolation_flags=[
+                ExtrapolationFlag(**flag) for flag in c.get("extrapolation_flags", [])
+            ],
+            passes=bool(c["passes"]),
+            failed_gates=list(c.get("failed_gates", [])),
+        )
+        for c in d.get("candidates", [])
+    ]
+    return RampRecommendation(
+        baseline_plan_name=d["baseline_plan_name"],
+        target_plan_name=d["target_plan_name"],
+        recommended_fraction=float(d["recommended_fraction"]),
+        status=d["status"],
+        candidates=candidates,
+        explanation=d["explanation"],
+        blocking_reason=d.get("blocking_reason"),
     )
