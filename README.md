@@ -13,9 +13,9 @@ measurement without a PhD program.
 
 **Status:** Active pre-1.0 development. The combined BRD/PRD is locked at v0.4
 and lives in [`docs/wanamaker_brd_prd.md`](docs/wanamaker_brd_prd.md). The
-core local workflow is now in place: `diagnose`, `fit`, `report`, `forecast`,
-`compare-scenarios`, `recommend-ramp`, `refresh`, and
-`run --example public_benchmark`.
+core local workflow is now in place: `diagnose`, `fit`, `report`, `showcase`,
+`trust-card`, `export`, `forecast`, `compare-scenarios`, `recommend-ramp`,
+`refresh`, and `run --example public_benchmark`.
 
 ## What this is for
 
@@ -54,10 +54,17 @@ wanamaker run --example public_benchmark
 
 That's the whole thing. The command runs the readiness diagnostic, fits a
 quick-mode Bayesian model on the bundled `public_benchmark` dataset, and
-prints the executive summary plus the Model Trust Card. The full report
-is also written to `.wanamaker/runs/<run_id>/report.md`, and an HTML
-showcase suitable for emailing is rendered alongside it. Expect a few
-minutes on a modern laptop.
+prints the executive summary plus the Model Trust Card. Four artifacts land
+in `.wanamaker/runs/<run_id>/`:
+
+| File | Audience | Purpose |
+|---|---|---|
+| `report.md` | analyst | Full executive summary + Trust Card in Markdown — git-friendly, paste into Slack |
+| `showcase.html` | stakeholders | Self-contained HTML with channel charts, response curves, waterfall — email this |
+| `trust_card.html` | executives | One-page plain-English Trust Card — forward when "do I trust this MMM?" comes up |
+| `summary.xlsx` | analysts | Structured tables (channels, ROI, parameters, scenarios) for pivots and slicing |
+
+Expect a few minutes on a modern laptop.
 
 ## Try it without installing
 

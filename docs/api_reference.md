@@ -45,7 +45,7 @@ The command prints a run ID. Use that run ID with `report`, `forecast`, and
 
 ### `wanamaker report`
 
-Render the executive summary and Model Trust Card for a completed run.
+Render the Markdown executive summary and Model Trust Card for a completed run.
 
 ```bash
 wanamaker report --run-id <run_id>
@@ -56,6 +56,63 @@ wanamaker report --run-id <run_id>
 | `--run-id` | string | required | Existing run ID under the artifact directory. |
 | `--artifact-dir` | path | `.wanamaker` | Root artifact directory. |
 | `--output` | path | `<run_dir>/report.md` | Markdown report path. |
+
+### `wanamaker showcase`
+
+Render a single self-contained HTML showcase suitable for forwarding to
+stakeholders. Bundles channel charts, response curves, ROI, the contribution
+waterfall, the Trust Card, and an optional side-by-side scenario comparison.
+
+```bash
+wanamaker showcase --run-id <run_id>
+wanamaker showcase --run-id <run_id> --scenario base.csv --scenario alt.csv
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--run-id` | string | required | Existing run ID under the artifact directory. |
+| `--artifact-dir` | path | `.wanamaker` | Root artifact directory. |
+| `--output` | path | `<run_dir>/showcase.html` | Output HTML path. |
+| `--title` | string | `"Wanamaker MMM — <run_id short>"` | Override the showcase title. |
+| `--scenario` | path, repeatable | none | Plan CSV to forecast and overlay. Pass multiple times for side-by-side comparison; the first plan is the baseline for the delta column. |
+| `--open` | flag | false | Open the rendered showcase in the default browser. |
+
+### `wanamaker trust-card`
+
+Render the executive-facing Trust Card one-pager. Single self-contained HTML
+file designed for forwarding to non-technical readers and printing to one
+physical page.
+
+```bash
+wanamaker trust-card --run-id <run_id>
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--run-id` | string | required | Existing run ID under the artifact directory. |
+| `--artifact-dir` | path | `.wanamaker` | Root artifact directory. |
+| `--output` | path | `<run_dir>/trust_card.html` | Output HTML path. |
+| `--title` | string | `"Wanamaker MMM — <run_id short>"` | Override the title. |
+| `--open` | flag | false | Open the rendered one-pager in the default browser. |
+
+### `wanamaker export`
+
+Export a run's structured tables to an analyst-friendly Excel workbook.
+Sheets: Summary, Channels, Trust Card, Parameters, optional Refresh diff,
+optional Scenarios. Numbers are stored as numbers (not formatted strings) so
+formulas and pivots work directly.
+
+```bash
+wanamaker export --run-id <run_id> --format excel
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--run-id` | string | required | Existing run ID under the artifact directory. |
+| `--format` | string | `excel` | Export format. Currently only `excel` (.xlsx) is implemented. |
+| `--artifact-dir` | path | `.wanamaker` | Root artifact directory. |
+| `--output` | path | `<run_dir>/summary.xlsx` | Output workbook path. |
+| `--scenario` | path, repeatable | none | Plan CSV to forecast and include as a row in the Scenarios sheet. |
 
 ### `wanamaker forecast`
 
