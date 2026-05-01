@@ -628,7 +628,6 @@ def trust_card(
     Trust Card dimension instead of the analyst-facing technical text.
     """
     import webbrowser
-    from datetime import datetime, timezone
 
     from wanamaker import __version__
     from wanamaker.artifacts import (
@@ -693,7 +692,7 @@ def trust_card(
         card,
         title=title or f"Wanamaker MMM — {run_id[:8]}",
         run_id=run_id,
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         package_version=__version__,
         run_fingerprint=run_fingerprint,
     )
