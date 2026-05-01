@@ -18,6 +18,8 @@ Three principles shape every architectural decision:
 2. **Engine-isolated core.** PyMC is the selected Bayesian engine, but feature code must still interface through `wanamaker.engine` and never import PyMC directly.
 3. **Local-first, always.** No module in the core code path may import an HTTP client, telemetry library, or LLM SDK. This is enforced by a CI test (`tests/test_no_network_in_core.py`), not just convention.
 
+A fourth principle governs language rather than structure: **decision-support, not optimizer-grade promises.** User-facing output uses cautious phrasing ("candidate scenarios", "risk-adjusted ramp", "largest defensible move") and avoids phrases that imply the model has produced a globally optimal answer ("optimized budget", "optimal allocation", "best budget", "guaranteed lift", "maximize ROI" as a promise). The full list lives in `AGENTS.md` (at the repository root, under "Product terminology") and is enforced by `tests/unit/test_terminology_guardrails.py` against every report template and helper module.
+
 ---
 
 ## 2. Repository Layout

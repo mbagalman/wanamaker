@@ -201,3 +201,24 @@ Wanamaker is a Blue Ocean play — its differentiation comes from honesty about 
 - When the model can't tell the user something, say so plainly. "TV spend was constant during the model period — we can't estimate its saturation from data; the curve shown is from prior knowledge only." Not "Insufficient variance for parameter identifiability."
 - Avoid AI-sparkle phrases like "powered by," "intelligent," "smart," "advanced." This project's credibility comes from being unflashy.
 - The project name comes from the apocryphal John Wanamaker quote about half of advertising spend being wasted. The misattribution is part of the story — a quote about measurement uncertainty whose own provenance is uncertain.
+
+## Product terminology: decision language, not optimizer language
+
+Wanamaker is a decision-support tool, not a constrained-optimization budget engine. The BRD/PRD intentionally defers true inverse optimization because it carries high model-overconfidence risk. **User-facing copy must respect that line.** Use the phrasing that says "the model evaluated the plan you supplied" rather than "the model found the optimal plan."
+
+**Use** — these are the right phrases for v1 outputs and docs:
+
+- "candidate scenarios" / "suggested scenarios" / "bounded candidate plans"
+- "scenario comparison"
+- "risk-adjusted ramp"
+- "largest defensible move"
+
+**Avoid** — these imply the model produced a globally optimal answer, which it does not:
+
+- "optimized budget"
+- "optimal allocation"
+- "best budget"
+- "guaranteed lift"
+- "maximize ROI" used as a promise or product goal
+
+The unit test `tests/unit/test_terminology_guardrails.py` enforces this on every Jinja2 template under `src/wanamaker/reports/templates/` and every Python helper in `src/wanamaker/reports/` that injects literal copy. If you have a legitimate reason to *discuss* one of the banned phrases (for example, to tell readers "Wanamaker does not produce an optimized budget"), do so in contributor-facing or design docs (this file, `docs/architecture.md`, `docs/risk_adjusted_allocation.md`) — those are out of scope for the guardrail test.

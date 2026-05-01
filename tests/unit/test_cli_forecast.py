@@ -399,11 +399,21 @@ class TestCompareScenariosHappyPath:
         assert report.exists()
         body = report.read_text()
         assert "# Scenario comparison" in body
-        assert "## Ranking" in body
+        # Decision-grade ranking is the lead table.
+        assert "## Decision ranking" in body
+        # Plain-English interpretation block exists.
+        assert "## How to read each scenario" in body
+        # Outcome and delta detail preserves analyst-facing HDI columns.
+        assert "## Outcome and delta detail" in body
         assert "aggressive" in body
         assert "conservative" in body
-        # Higher-mean plan listed before lower-mean plan in the ranking section.
-        assert body.index("aggressive") < body.index("conservative")
+        # Higher-mean plan listed before lower-mean plan inside the ranking
+        # section. Scope the index check to the ranking block since the
+        # baseline-plan header above mentions `conservative` by name.
+        ranking_start = body.index("## Decision ranking")
+        ranking_end = body.index("## How to read each scenario")
+        ranking_block = body[ranking_start:ranking_end]
+        assert ranking_block.index("aggressive") < ranking_block.index("conservative")
         # Total spend section lists both channels.
         assert "## Total spend by channel" in body
         assert "`search`" in body and "`tv`" in body
