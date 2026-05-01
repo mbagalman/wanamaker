@@ -12,7 +12,9 @@ reading channel estimates, uncertainty, and the Trust Card.
 If you just want to see Wanamaker run end-to-end on the public example:
 
 ```bash
-pip install wanamaker
+git clone https://github.com/mbagalman/wanamaker.git
+cd wanamaker
+pip install -e ".[dev]"
 wanamaker run --example public_benchmark
 ```
 

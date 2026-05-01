@@ -158,7 +158,10 @@ The Hill function alone (without channel-specific data) is hard to specify prior
 
 ## 5. Estimation Approaches
 
-Wanamaker uses **Bayesian estimation** via the engine layer (PyMC, NumPyro, or Stan — to be decided in Phase -1). The adstock and saturation parameters are treated as model parameters with priors and are estimated jointly with the channel coefficients.
+Wanamaker uses **Bayesian estimation** via the engine layer, with PyMC as the
+current production backend. The adstock and saturation parameters are treated
+as model parameters with priors and are estimated jointly with the channel
+coefficients.
 
 For reference, here are the alternatives that are *not* used:
 

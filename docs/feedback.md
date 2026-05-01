@@ -139,10 +139,11 @@ tags, or nightly rather than every PR.
 
 ### One-Command Demo
 
-**Status: Tracked, not implemented.**
+**Status: Resolved.**
 
-Issue #42 tracks the `wanamaker run --example public_benchmark` style wrapper.
-This remains blocked by the report command and public example dataset work.
+`wanamaker run --example public_benchmark` now chains the readiness diagnostic,
+quick-mode fit, and report rendering on the bundled public benchmark dataset.
+The remaining work is release verification, not a product-design gap.
 
 ## Documentation Cleanup
 

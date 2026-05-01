@@ -5,8 +5,9 @@ three-layer progressive disclosure architecture in FR-7). Every field here
 should be motivated by an actual user need — per AGENTS.md, do not add
 config options speculatively.
 
-The schema is intentionally minimal in the scaffold; fields will accrete
-as features land.
+The schema is intentionally compact. New fields should be added only when a
+real workflow needs them because every option becomes part of the user-facing
+contract.
 """
 
 from __future__ import annotations

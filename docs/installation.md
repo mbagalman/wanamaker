@@ -1,37 +1,53 @@
 # Installation
 
-This page will cover the supported installation paths for Wanamaker.
+Wanamaker is in active pre-1.0 development. The package is not published to
+PyPI yet, so the supported path today is a source checkout.
 
-## Status
+## Requirements
 
-Wanamaker is in Phase -1. The Bayesian engine has not been selected yet, so installation
-instructions are not final.
+- Python 3.11+
+- No R runtime
+- No GPU requirement for v1
+- No network access required for core commands after installation
 
-## Planned Paths
+The selected Bayesian engine is PyMC. Install time can be longer than a small
+pure-Python package because the scientific Python stack is part of the runtime.
 
-### pip
+## Source Checkout
 
-The target path for users comfortable with Python environments:
+Clone the repository and install it in editable mode:
 
 ```bash
-pip install wanamaker
+git clone https://github.com/mbagalman/wanamaker.git
+cd wanamaker
+pip install -e ".[dev]"
 ```
 
-For local development:
+For documentation work:
+
+```bash
+pip install -e ".[docs]"
+```
+
+For both development and docs:
 
 ```bash
 pip install -e ".[dev,docs]"
 ```
 
-### Docker
+Verify the CLI is available:
 
-The target path for users who want all dependencies pre-resolved.
+```bash
+wanamaker --help
+wanamaker run --example public_benchmark
+```
 
-#### Build from source (available today)
+The example writes artifacts under `.wanamaker/runs/<run_id>/`.
 
-A `Dockerfile` ships in the repository root. Until the official
-`wanamaker/wanamaker` image is published to Docker Hub at v1.0, build
-the image locally:
+## Docker
+
+A `Dockerfile` ships in the repository root. Until an official image is
+published, build it locally:
 
 ```bash
 git clone https://github.com/mbagalman/wanamaker.git
@@ -39,40 +55,26 @@ cd wanamaker
 docker build -t wanamaker .
 ```
 
-Run the bundled one-command demo inside the image:
+Run the bundled example:
 
 ```bash
 docker run --rm wanamaker run --example public_benchmark
 ```
 
-Run any subcommand against your own data by mounting the file:
+Run a command against local files by mounting your project directory:
 
 ```bash
-docker run --rm -v "$PWD":/workspace wanamaker diagnose data.csv --config config.yaml
+docker run --rm -v "$PWD":/workspace wanamaker diagnose /workspace/data.csv --config /workspace/config.yaml
 ```
 
-The image leaves run artifacts in the container's `/workspace/.wanamaker/`
-directory; mounting your project root lets `wanamaker fit` write them
-back to the host filesystem so they persist between runs.
+Run artifacts written under `/workspace/.wanamaker/` persist on the host when
+the project directory is mounted.
 
-#### Pulled image (after v1.0)
+## Not Yet Published
 
-Once the image is published, the same flow becomes:
+The future user-facing install paths are still release work:
 
-```bash
-docker run --rm wanamaker/wanamaker run --example public_benchmark
-```
+- `pip install wanamaker` after the PyPI package is published
+- `docker run --rm wanamaker/wanamaker ...` after the official image is published
 
-## Requirements
-
-- Python 3.11+
-- No R runtime
-- No GPU requirement for v1
-- No network access required for core commands after installation (see [Privacy and Data Handling](privacy.md) for details on our local-first guarantees)
-
-## To Be Completed
-
-- Final engine-specific dependency notes
-- Windows, macOS, and Linux installation checks
-- Docker mount examples for local CSV files
-
+Until then, use the source checkout or locally built Docker image.

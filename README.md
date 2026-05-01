@@ -11,10 +11,11 @@ measurement without a PhD program.
 
 ---
 
-**Status:** Pre-build. The combined BRD/PRD is locked at v0.4 and lives in
-[`docs/wanamaker_brd_prd.md`](docs/wanamaker_brd_prd.md). The current phase
-is **Phase -1**: engine decision spike and persona validation. Nothing in
-this repository fits a model yet.
+**Status:** Active pre-1.0 development. The combined BRD/PRD is locked at v0.4
+and lives in [`docs/wanamaker_brd_prd.md`](docs/wanamaker_brd_prd.md). The
+core local workflow is now in place: `diagnose`, `fit`, `report`, `forecast`,
+`compare-scenarios`, `recommend-ramp`, `refresh`, and
+`run --example public_benchmark`.
 
 ## What this is for
 
@@ -45,7 +46,9 @@ Wanamaker sits in the gap.
 ## One-command end-to-end example
 
 ```bash
-pip install wanamaker
+git clone https://github.com/mbagalman/wanamaker.git
+cd wanamaker
+pip install -e ".[dev]"
 wanamaker run --example public_benchmark
 ```
 
@@ -61,8 +64,8 @@ minutes on a modern laptop.
 2. [Privacy and Data Handling](docs/privacy.md) — confidentiality and data isolation guarantees
 3. [`AGENTS.md`](AGENTS.md) — guidance for AI coding assistants and human
    contributors on how to work in this codebase
-4. The `Comparison to Other Tools` page (forthcoming) — Wanamaker vs.
-   Robyn, Meridian, Recast, PyMC-Marketing
+4. [Comparison to Other Tools](docs/comparison.md) — Wanamaker vs. Robyn,
+   Meridian, Recast, PyMC-Marketing
 
 ## License
 
