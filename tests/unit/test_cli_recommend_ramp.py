@@ -271,7 +271,9 @@ def test_each_ramp_status_is_reachable_through_cli(
     assert report.exists()
     body = report.read_text()
     assert f"(`{expected_status}`)" in body
-    assert "## Candidate Gates" in body
+    assert "## Decision ladder" in body
+    # The analyst-detail "Sizing detail" table preserves the failed_gates
+    # column; verify it lands when there is at least one fail.
     if expected_status != "do_not_recommend":
         assert "Failed gates" in body
 
@@ -290,7 +292,13 @@ def test_report_contains_risk_table_failed_gates_and_advisor_handoff(
     assert result.exit_code == 0, result.output
 
     body = (run_dir / "ramp_base_to_alt.md").read_text()
-    assert "| Ramp | Gate status | Expected increment | P(improvement) |" in body
+    # Decision ladder is the lead executive-facing table.
+    assert (
+        "| Ramp | Expected lift | Downside risk | Historical support | "
+        "Trust Card gate | Verdict |"
+    ) in body
+    # Analyst detail table is preserved at the bottom.
+    assert "## Sizing detail (for analysts)" in body
     assert "extrapolation" in body
     assert "A test on `search` would most reduce the binding gate." in body
 

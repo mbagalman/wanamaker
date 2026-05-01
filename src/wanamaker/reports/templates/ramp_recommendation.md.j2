@@ -1,7 +1,7 @@
 {# Risk-adjusted allocation ramp template (FR-5.6).
 
-   Voice: dry, direct, deterministic. This report explains how far the
-   model supports moving from a baseline plan toward a target plan.
+   Voice: dry, direct, deterministic. Leads with a decision-friendly
+   ladder; analyst-detail metrics live at the bottom.
 #}
 # Risk-adjusted ramp recommendation
 
@@ -23,23 +23,46 @@
 Blocking reason: `{{ blocking_reason }}`
 {% endif %}
 
-## Candidate Gates
+## Decision ladder
 
 {% if candidates %}
-| Ramp | Gate status | Expected increment | P(improvement) | P(material loss) | q05 increment | CVaR 5 | Largest move share | Kelly cap | Failed gates | Extrapolation flags |
-|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| Ramp | Expected lift | Downside risk | Historical support | Trust Card gate | Verdict |
+|---:|---:|---:|---|---|---|
 {% for c in candidates %}
-| {{ c.fraction_label }} | {% if c.passes %}pass{% else %}fail{% endif %} | {{ "{:,.0f}".format(c.expected_increment) }} | {{ "{:.0%}".format(c.probability_positive) }} | {{ "{:.0%}".format(c.probability_material_loss) }} | {{ "{:,.0f}".format(c.q05_increment) }} | {{ "{:,.0f}".format(c.cvar_5) }} | {{ "{:.0%}".format(c.largest_move_share) }} | {{ "{:.0%}".format(c.fractional_kelly) }} | {{ c.failed_gates_label }} | {{ c.extrapolation_count }} |
+| {{ c.fraction_label }} | {{ c.expected_lift_label }} | {{ c.downside_risk_label }} | {{ c.historical_support_label }} | {{ c.trust_card_gate_label }} | {{ c.verdict_label }}{% if c.is_selected %} (selected){% endif %} |
 {% endfor %}
 {% else %}
-No positive ramp candidates were evaluated. The recommendation was blocked before
-candidate scoring.
+No positive ramp candidates were evaluated. The recommendation was blocked
+before candidate scoring.
 {% endif %}
 
-## How To Use This
+{% set failed_candidates = candidates | rejectattr("passes") | list %}
+{% if failed_candidates %}
+## Why each fraction's verdict
+
+{% for c in failed_candidates %}
+- **{{ c.fraction_label }} (fail):** {% for reason in c.failure_reasons %}{{ reason }}{% if not loop.last %}; {% endif %}{% endfor %}.
+{% endfor %}
+{% endif %}
+
+## How to use this
 
 This is not an automatic budget optimizer. It evaluates how much of the
-user-supplied target plan is analytically supported right now. If the verdict is
-`stage`, adopt the recommended fraction and refresh after new data arrives. If
-the verdict is `test_first`, the next useful action is better evidence, not a
-larger immediate move.
+user-supplied target plan is analytically supported right now. If the
+verdict is `stage`, adopt the recommended fraction and refresh after new
+data arrives. If the verdict is `test_first`, the next useful action is
+better evidence, not a larger immediate move.
+
+## Sizing detail (for analysts)
+
+The ladder above hides Kelly-style sizing math behind the
+"risk-adjusted sizing cap" gate. The table below preserves the raw
+metrics so analysts can audit the verdict.
+
+{% if candidates %}
+| Ramp | P(improve) | P(material loss) | q05 increment | CVaR 5 | Largest move share | Sizing cap | Failed gates |
+|---:|---:|---:|---:|---:|---:|---:|---|
+{% for c in candidates %}
+| {{ c.fraction_label }} | {{ "{:.0%}".format(c.probability_positive) }} | {{ "{:.0%}".format(c.probability_material_loss) }} | {{ "{:,.0f}".format(c.q05_increment) }} | {{ "{:,.0f}".format(c.cvar_5) }} | {{ "{:.0%}".format(c.largest_move_share) }} | {{ "{:.0%}".format(c.fractional_kelly) }} | {{ c.failed_gates_label }} |
+{% endfor %}
+{% endif %}

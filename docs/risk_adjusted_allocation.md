@@ -360,6 +360,47 @@ but the lower-tail risk is too large and most of the move is outside observed
 spend ranges.
 ```
 
+## Reading the Decision Ladder
+
+The Markdown report leads with a six-column ladder, one row per ramp
+fraction:
+
+| Ramp | Expected lift | Downside risk | Historical support | Trust Card gate | Verdict |
+|---:|---:|---:|---|---|---|
+| 10% | +$54,000 | 4% | in range | pass | pass (selected) |
+| 25% | +$135,000 | 9% | in range | pass | pass |
+| 50% | +$255,000 | 17% | mild | pass | fail |
+| 75% | +$340,000 | 24% | severe | pass | fail |
+| 100% | +$405,000 | 31% | severe | pass | fail |
+
+How to read each column:
+
+- **Ramp** — the partial move evaluated, in 10/25/50/75/100% of the
+  baseline → target delta.
+- **Expected lift** — posterior mean increment vs. the baseline plan.
+  Signed integer, rounded to whole units of the target metric.
+- **Downside risk** — posterior probability of a "material loss" relative
+  to baseline (the threshold defaults to 5% of baseline outcome). A
+  one-number summary; the analyst-detail table at the bottom of the
+  report exposes the underlying CVaR and q05.
+- **Historical support** — three buckets: ``in range`` (every channel
+  stays inside its training-window spend range), ``mild`` (some flagged
+  cells but the extrapolation gate did not trigger), ``severe`` (the
+  extrapolation gate failed at this fraction).
+- **Trust Card gate** — ``pass`` unless a weak Trust Card dimension
+  caps this fraction below the requested move.
+- **Verdict** — ``pass`` or ``fail``. The recommended fraction (the
+  largest passing one) is marked ``(selected)``.
+
+Below the ladder the report lists, for each fraction that failed,
+plain-English bullets explaining *which* gates failed and *why*. That
+part is the part to forward when a stakeholder asks "why didn't we go
+to 50%?"
+
+The bottom of the report includes a "Sizing detail (for analysts)"
+table that preserves the Kelly-style sizing math, q05, CVaR, and the
+raw failed-gate names for analysts who want to audit the verdict.
+
 ## Integration With Existing Wanamaker Concepts
 
 ### Scenario Comparison
