@@ -49,14 +49,14 @@ def test_load_lift_test_csv_parses_dates_and_numeric_fields(tmp_path: Path) -> N
 
     df = load_lift_test_csv(path)
 
-    assert set(df.columns) == {
+    assert list(df.columns) == [
         "channel",
         "test_start",
         "test_end",
         "roi_estimate",
         "roi_ci_lower",
         "roi_ci_upper",
-    }
+    ]
     assert df.loc[0, "channel"] == "search"
     assert pd.api.types.is_datetime64_any_dtype(df["test_start"])
     assert df.loc[0, "roi_estimate"] == pytest.approx(2.0)
@@ -133,6 +133,18 @@ def test_load_lift_test_csv_rejects_mixed_schemas(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="mixes multiple schemas"):
+        load_lift_test_csv(path)
+
+
+def test_load_lift_test_csv_outcome_schema_rejects_non_numeric(tmp_path: Path) -> None:
+    path = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,incremental_outcome,incremental_spend,ci_lower_outcome,ci_upper_outcome\n"
+        "search,2024-01-01,2024-01-14,abc,50,60,140\n",
+    )
+
+    # pd.to_numeric(errors="raise") drops down to a base ValueError
+    with pytest.raises(ValueError, match="Unable to parse string"):
         load_lift_test_csv(path)
 
 

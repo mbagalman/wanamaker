@@ -202,6 +202,11 @@ Unknown fields are rejected.
 | `control_columns` | list of strings | `[]` | Non-media controls such as price, promotions, holidays, or macro indicators. |
 | `lift_test_csv` | path or null | `null` | Optional lift-test calibration CSV. |
 
+For `lift_test_csv`, Wanamaker supports three CSV schemas (all require `channel`, `test_start`, and `test_end` columns):
+- **ROI Schema (Canonical):** Explicit ROI fields using `roi_estimate`, `roi_ci_lower`, and `roi_ci_upper`.
+- **Outcome Schema:** `incremental_outcome`, `incremental_spend`, `ci_lower_outcome`, and `ci_upper_outcome`. Wanamaker calculates ROI internally as outcome / spend.
+- **Legacy Schema:** Legacy lift fields `lift_estimate`, `ci_lower`, and `ci_upper`. Supported with a deprecation warning.
+
 ### `channels`
 
 Each entry describes one spend column.
