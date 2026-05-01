@@ -599,6 +599,33 @@ class TestGracefulFallbackWithoutDraws:
         assert non_baseline.delta_vs_baseline_mean == 0.0
 
 
+class TestPerDrawHelpers:
+    def test_per_draw_totals_accepts_array_like_draws(self) -> None:
+        from wanamaker.forecast.scenarios import _per_draw_totals
+
+        result = PredictiveSummary(
+            periods=["p1", "p2"],
+            mean=[1.0, 2.0],
+            hdi_low=[0.0, 1.0],
+            hdi_high=[2.0, 3.0],
+            draws=[[1.0, 2.0], [3.0, 4.0]],
+        )
+
+        assert _per_draw_totals(result).tolist() == [3.0, 7.0]
+
+    def test_hdi_uses_shortest_interval_not_equal_tailed_quantiles(self) -> None:
+        from wanamaker.forecast.scenarios import _hdi
+
+        low, high = _hdi(
+            # Shortest 80% interval is [0, 3], not an interpolated
+            # equal-tailed interval that would include part of the outlier gap.
+            values=pd.Series([0.0, 1.0, 2.0, 3.0, 100.0]).to_numpy(),
+            mass=0.8,
+        )
+
+        assert (low, high) == (0.0, 3.0)
+
+
 class TestNoBannedTerminology:
     """The interpretation sentences must not leak optimizer language."""
 

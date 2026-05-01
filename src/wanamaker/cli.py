@@ -754,7 +754,7 @@ def export(
     formatted strings) so analysts can pivot and compute on them
     directly.
     """
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from wanamaker import __version__
     from wanamaker.artifacts import (
@@ -839,7 +839,7 @@ def export(
         period_start=period_start,
         period_end=period_end,
         n_periods=n_periods,
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         package_version=__version__,
         runtime_mode=runtime_mode,
         engine_label=engine_label,

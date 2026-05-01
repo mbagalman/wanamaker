@@ -231,27 +231,29 @@ def _per_draw_totals(forecast_result: object) -> np.ndarray | None:
     / ``0.0``.
     """
     draws = getattr(forecast_result, "draws", None)
-    if not draws:
+    if draws is None:
         return None
     arr = np.asarray(draws, dtype=float)
-    if arr.ndim != 2:
+    if arr.ndim != 2 or arr.size == 0:
         return None
     return arr.sum(axis=1)
 
 
 def _hdi(values: np.ndarray, mass: float = 0.95) -> tuple[float, float]:
-    """Highest-density interval bounds via the central-mass shortcut.
-
-    For roughly unimodal posterior deltas this returns the same bounds
-    as a proper HDI; for multimodal cases it slightly under-covers but
-    stays well-defined. Same approximation the engine summary uses.
-    """
+    """Return shortest interval containing ``mass`` of the sample draws."""
     if values.size == 0:
         return 0.0, 0.0
-    alpha = (1.0 - mass) / 2.0
-    low = float(np.quantile(values, alpha))
-    high = float(np.quantile(values, 1.0 - alpha))
-    return low, high
+    if not 0 < mass <= 1:
+        raise ValueError(f"mass must be in (0, 1]; got {mass!r}")
+    sorted_values = np.sort(np.asarray(values, dtype=float).reshape(-1))
+    interval_size = max(1, int(np.ceil(mass * sorted_values.size)))
+    if interval_size >= sorted_values.size:
+        return float(sorted_values[0]), float(sorted_values[-1])
+    lows = sorted_values[: sorted_values.size - interval_size + 1]
+    highs = sorted_values[interval_size - 1 :]
+    widths = highs - lows
+    best = int(np.argmin(widths))
+    return float(lows[best]), float(highs[best])
 
 
 def _interpretation_sentence(
