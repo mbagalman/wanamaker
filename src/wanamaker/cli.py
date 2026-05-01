@@ -754,7 +754,7 @@ def export(
     formatted strings) so analysts can pivot and compute on them
     directly.
     """
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from wanamaker import __version__
     from wanamaker.artifacts import (
@@ -839,7 +839,7 @@ def export(
         period_start=period_start,
         period_end=period_end,
         n_periods=n_periods,
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         package_version=__version__,
         runtime_mode=runtime_mode,
         engine_label=engine_label,
@@ -1927,21 +1927,39 @@ def _format_forecast_markdown(result: Any, run_id: str, plan_path: Path) -> str:
 
 
 def _print_scenario_comparison_table(results: list[Any]) -> None:
-    """Print the ranked scenario comparison as a human-readable table."""
+    """Print the ranked scenario comparison as a human-readable table.
+
+    Lead columns are decision-grade: rank, plan, expected outcome, delta
+    vs baseline, P(beats baseline), P(material loss). The full 95% HDI
+    is preserved in the saved Markdown report rather than the terminal
+    summary so the line stays scannable.
+    """
     typer.echo("\nScenario comparison (ranked by expected outcome)")
     typer.echo("")
     typer.echo(
-        f"  {'Rank':<5} {'Plan':<24} {'Expected outcome':>18} {'95% HDI':>30}"
+        f"  {'Rank':<5} {'Plan':<24} {'Expected outcome':>18} "
+        f"{'Delta vs baseline':>16} {'P(beats)':>10} {'P(loss)':>9}"
     )
     for rank, result in enumerate(results, start=1):
-        hdi_label = (
-            f"{result.expected_outcome_hdi_low:,.0f}–"
-            f"{result.expected_outcome_hdi_high:,.0f}"
-        )
+        if result.is_baseline:
+            delta_label = "—"
+            p_beats_label = "—"
+            p_loss_label = "—"
+        else:
+            delta_label = f"{result.delta_vs_baseline_mean:+,.0f}"
+            p_beats_label = f"{result.probability_beats_baseline:.0%}"
+            p_loss_label = f"{result.probability_material_loss:.0%}"
+        marker = " (baseline)" if result.is_baseline else ""
+        plan_label = (result.plan_name + marker)[:24]
         typer.echo(
-            f"  {rank:<5} {result.plan_name:<24} "
-            f"{result.expected_outcome_mean:>18,.2f} {hdi_label:>30}"
+            f"  {rank:<5} {plan_label:<24} "
+            f"{result.expected_outcome_mean:>18,.0f} "
+            f"{delta_label:>16} {p_beats_label:>10} {p_loss_label:>9}"
         )
+
+    typer.echo("")
+    for result in results:
+        typer.echo(f"  {result.plan_name}: {result.interpretation}")
     for result in results:
         if result.spend_invariant_channels:
             typer.echo(
@@ -1963,24 +1981,73 @@ def _print_scenario_comparison_table(results: list[Any]) -> None:
 
 
 def _format_scenario_comparison_markdown(results: list[Any], run_id: str) -> str:
-    """Produce the saved Markdown report for a scenario comparison."""
+    """Produce the saved Markdown report for a scenario comparison.
+
+    Leads with a decision-grade ranking table (delta vs baseline,
+    probability metrics) and a per-plan plain-English interpretation
+    block. Raw outcome HDI columns and total-spend-by-channel are
+    preserved as analyst detail below.
+    """
     lines: list[str] = []
     lines.append("# Scenario comparison")
     lines.append("")
     lines.append(f"- Run ID: `{run_id}`")
     lines.append(f"- Plans compared: {len(results)}")
+    baseline_row = next((r for r in results if r.is_baseline), None)
+    if baseline_row is not None:
+        lines.append(f"- Baseline plan: `{baseline_row.plan_name}`")
     lines.append("")
 
-    lines.append("## Ranking")
+    lines.append("## Decision ranking")
     lines.append("")
-    lines.append("| Rank | Plan | Expected outcome | 95% HDI low | 95% HDI high |")
-    lines.append("|---|---|---|---|---|")
+    lines.append(
+        "| Rank | Plan | Expected outcome | Delta vs baseline | "
+        "P(beats baseline) | P(material loss) |"
+    )
+    lines.append("|---|---|---:|---:|---:|---:|")
     for rank, result in enumerate(results, start=1):
+        if result.is_baseline:
+            plan_cell = f"`{result.plan_name}` (baseline)"
+            delta_cell = "—"
+            p_beats_cell = "—"
+            p_loss_cell = "—"
+        else:
+            plan_cell = f"`{result.plan_name}`"
+            delta_cell = f"{result.delta_vs_baseline_mean:+,.0f}"
+            p_beats_cell = f"{result.probability_beats_baseline:.0%}"
+            p_loss_cell = f"{result.probability_material_loss:.0%}"
         lines.append(
-            f"| {rank} | `{result.plan_name}` | "
-            f"{result.expected_outcome_mean:,.2f} | "
-            f"{result.expected_outcome_hdi_low:,.2f} | "
-            f"{result.expected_outcome_hdi_high:,.2f} |"
+            f"| {rank} | {plan_cell} | "
+            f"{result.expected_outcome_mean:,.0f} | "
+            f"{delta_cell} | {p_beats_cell} | {p_loss_cell} |"
+        )
+    lines.append("")
+
+    lines.append("## How to read each scenario")
+    lines.append("")
+    for result in results:
+        lines.append(f"- **`{result.plan_name}`** — {result.interpretation}")
+    lines.append("")
+
+    lines.append("## Outcome and delta detail")
+    lines.append("")
+    lines.append(
+        "| Plan | 95% HDI low | 95% HDI high | "
+        "Delta HDI low | Delta HDI high |"
+    )
+    lines.append("|---|---:|---:|---:|---:|")
+    for result in results:
+        if result.is_baseline:
+            delta_low_cell = "—"
+            delta_high_cell = "—"
+        else:
+            delta_low_cell = f"{result.delta_vs_baseline_hdi_low:+,.0f}"
+            delta_high_cell = f"{result.delta_vs_baseline_hdi_high:+,.0f}"
+        lines.append(
+            f"| `{result.plan_name}` | "
+            f"{result.expected_outcome_hdi_low:,.0f} | "
+            f"{result.expected_outcome_hdi_high:,.0f} | "
+            f"{delta_low_cell} | {delta_high_cell} |"
         )
     lines.append("")
 

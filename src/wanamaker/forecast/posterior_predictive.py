@@ -139,6 +139,7 @@ def forecast(
         hdi_low=list(predictive.hdi_low),
         hdi_high=list(predictive.hdi_high),
         interval_mass=predictive.interval_mass,
+        draws=predictive.draws,
         extrapolation_flags=flags,
         spend_invariant_channels=spend_invariant_channels,
     )

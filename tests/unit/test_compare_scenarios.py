@@ -341,3 +341,321 @@ class TestResultDataclass:
         plan = _wide_plan([20.0], [100.0])
         results = compare_scenarios(_summary(), [plan], seed=0, engine=StubEngine())
         assert all(isinstance(r, ScenarioComparisonResult) for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Decision-grade metrics (issue #86)
+#
+# Probability and delta fields are computed from a per-draw outcome matrix
+# (PredictiveSummary.draws). DrawsStubEngine returns deterministic draws so
+# the tests can assert exact numbers without invoking PyMC.
+# ---------------------------------------------------------------------------
+
+
+class DrawsStubEngine:
+    """Deterministic engine that returns fixed per-draw outcomes.
+
+    The same seed produces the same draws across every plan, so paired
+    deltas have no within-engine noise — the engine simply maps the
+    plan's spend through fixed coefficients with a small fixed offset
+    per draw, then sums per period to get a total per draw.
+    """
+
+    def __init__(
+        self,
+        search_coef: float = 2.0,
+        tv_coef: float = 0.5,
+        draw_offsets: list[float] | None = None,
+    ) -> None:
+        self.search_coef = search_coef
+        self.tv_coef = tv_coef
+        # Default offsets create a small spread so the HDI is non-degenerate.
+        self.draw_offsets = draw_offsets or [-5.0, -2.0, 0.0, 2.0, 5.0]
+
+    def posterior_predictive(
+        self,
+        posterior_summary: PosteriorSummary,  # noqa: ARG002
+        new_data: pd.DataFrame,
+        seed: int,  # noqa: ARG002
+    ) -> PredictiveSummary:
+        period_means = (
+            new_data["search"].astype(float) * self.search_coef
+            + new_data["tv"].astype(float) * self.tv_coef
+        ).tolist()
+        # draws shape = (n_draws, n_periods).
+        draws = [
+            [m + offset for m in period_means]
+            for offset in self.draw_offsets
+        ]
+        # Use the per-draw matrix's own min/max as conservative HDI bounds.
+        column_lows = [min(d[i] for d in draws) for i in range(len(period_means))]
+        column_highs = [max(d[i] for d in draws) for i in range(len(period_means))]
+        return PredictiveSummary(
+            periods=new_data["period"].astype(str).tolist(),
+            mean=period_means,
+            hdi_low=column_lows,
+            hdi_high=column_highs,
+            draws=draws,
+        )
+
+
+class TestBaselineMarker:
+    def test_first_input_plan_is_baseline(self) -> None:
+        plans = [
+            _wide_plan([20.0], [100.0]),  # baseline
+            _wide_plan([40.0], [100.0]),
+        ]
+        results = compare_scenarios(
+            _summary(), plans, seed=0, engine=DrawsStubEngine(),
+        )
+        baseline = next(r for r in results if r.is_baseline)
+        assert baseline.plan_name == "Plan 1"
+        # And only one row is the baseline.
+        assert sum(r.is_baseline for r in results) == 1
+
+    def test_baseline_row_has_zero_delta_and_full_p_beats(self) -> None:
+        plans = [
+            _wide_plan([20.0], [100.0]),
+            _wide_plan([40.0], [100.0]),
+        ]
+        results = compare_scenarios(
+            _summary(), plans, seed=0, engine=DrawsStubEngine(),
+        )
+        baseline = next(r for r in results if r.is_baseline)
+        assert baseline.delta_vs_baseline_mean == 0.0
+        assert baseline.delta_vs_baseline_hdi_low == 0.0
+        assert baseline.delta_vs_baseline_hdi_high == 0.0
+        assert baseline.probability_beats_baseline == 1.0
+        assert baseline.probability_material_loss == 0.0
+
+
+class TestDeltaAndProbability:
+    def test_higher_mean_plan_has_positive_delta_and_high_p_beats(self) -> None:
+        plans = [
+            _wide_plan([20.0], [100.0]),  # mean = 90
+            _wide_plan([40.0], [100.0]),  # mean = 130
+        ]
+        results = compare_scenarios(
+            _summary(), plans, seed=0, engine=DrawsStubEngine(),
+        )
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert non_baseline.delta_vs_baseline_mean == pytest.approx(40.0)
+        # Every paired draw improves by exactly +40, so P(beats) = 100%.
+        assert non_baseline.probability_beats_baseline == 1.0
+        assert non_baseline.probability_material_loss == 0.0
+
+    def test_lower_mean_plan_has_negative_delta_and_low_p_beats(self) -> None:
+        plans = [
+            _wide_plan([40.0], [100.0]),  # baseline = 130
+            _wide_plan([20.0], [100.0]),  # mean = 90
+        ]
+        results = compare_scenarios(
+            _summary(), plans, seed=0, engine=DrawsStubEngine(),
+        )
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert non_baseline.delta_vs_baseline_mean == pytest.approx(-40.0)
+        assert non_baseline.probability_beats_baseline == 0.0
+        # 5% material-loss threshold of 130 = 6.5; -40 is far past that.
+        assert non_baseline.probability_material_loss == 1.0
+
+    def test_paired_delta_collapses_zero_when_plans_are_identical(self) -> None:
+        plan = _wide_plan([20.0], [100.0])
+        results = compare_scenarios(
+            _summary(), [plan, plan], seed=0, engine=DrawsStubEngine(),
+        )
+        # The non-baseline duplicate has zero paired delta on every draw.
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert non_baseline.delta_vs_baseline_mean == 0.0
+        # All draws are exactly equal -> P(strict beat) is 0%.
+        assert non_baseline.probability_beats_baseline == 0.0
+        assert non_baseline.probability_material_loss == 0.0
+
+
+class TestInterpretationSentences:
+    """Each interpretation bucket should produce a sentence the deterministic
+    template can render. The terminology guardrail enforces that none of
+    these sentences leaks optimizer language."""
+
+    def test_baseline_sentence_identifies_as_reference(self) -> None:
+        plans = [_wide_plan([20.0], [100.0]), _wide_plan([40.0], [100.0])]
+        results = compare_scenarios(
+            _summary(), plans, seed=0, engine=DrawsStubEngine(),
+        )
+        baseline = next(r for r in results if r.is_baseline)
+        assert "baseline" in baseline.interpretation.lower()
+
+    def test_directional_positive_sentence_for_high_p_beats(self) -> None:
+        plans = [
+            _wide_plan([20.0], [100.0]),  # baseline
+            _wide_plan([40.0], [100.0]),  # P(beats) = 100%
+        ]
+        # Use a TV-channel summary that's NOT spend-invariant so we hit
+        # the "no caveats" branch of the decision tree.
+        results = compare_scenarios(
+            _summary(spend_invariant_tv=False),
+            plans, seed=0, engine=DrawsStubEngine(),
+        )
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert "P(beats baseline) = 100%" in non_baseline.interpretation
+        assert "directional" in non_baseline.interpretation.lower()
+
+    def test_directional_negative_sentence_for_low_p_beats(self) -> None:
+        plans = [
+            _wide_plan([40.0], [100.0]),  # baseline
+            _wide_plan([20.0], [100.0]),  # P(beats) = 0%
+        ]
+        results = compare_scenarios(
+            _summary(spend_invariant_tv=False),
+            plans, seed=0, engine=DrawsStubEngine(),
+        )
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert "Lower expected outcome" in non_baseline.interpretation
+        assert "does not support" in non_baseline.interpretation
+
+    def test_extrapolation_sentence_when_plan_exceeds_observed_range(self) -> None:
+        plans = [
+            _wide_plan([20.0], [100.0]),  # baseline
+            _wide_plan([60.0], [100.0]),  # search=60 exceeds observed_max=50
+        ]
+        results = compare_scenarios(
+            _summary(spend_invariant_tv=False),
+            plans, seed=0, engine=DrawsStubEngine(),
+        )
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert "exceeds historical spend ranges" in non_baseline.interpretation
+        assert "controlled-test candidate" in non_baseline.interpretation
+
+    def test_spend_invariant_sentence_takes_precedence(self) -> None:
+        """Spend-invariant caveats should win the interpretation
+        regardless of probability metrics — FR-3.2 is the higher rule."""
+        plans = [_wide_plan([20.0], [100.0]), _wide_plan([20.0], [100.0])]
+        # tv is spend-invariant in this summary fixture.
+        results = compare_scenarios(
+            _summary(spend_invariant_tv=True),
+            plans, seed=0, engine=DrawsStubEngine(),
+        )
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert "spend-invariant" in non_baseline.interpretation
+        assert "FR-3.2" in non_baseline.interpretation
+
+    def test_indistinguishable_sentence_for_zero_straddling_delta(self) -> None:
+        """Direct test of the interpretation helper for the
+        ``delta credible interval straddles zero`` bucket.
+
+        Going through ``compare_scenarios`` here would be misleading: a
+        deterministic engine with paired draws produces a fully resolved
+        delta (paired noise cancels), so it can't naturally hit the
+        ``straddles zero`` decision branch. The helper itself is the
+        decision tree, so testing it directly is the correct level.
+        """
+        from wanamaker.forecast.scenarios import _interpretation_sentence
+
+        sentence = _interpretation_sentence(
+            is_baseline=False,
+            plan_name="alt",
+            extrapolation_flags=[],
+            spend_invariant_channels=[],
+            probability_beats_baseline=0.55,
+            probability_material_loss=0.05,
+            delta_hdi_low=-100.0,
+            delta_hdi_high=200.0,
+        )
+        assert "not meaningfully distinguishable" in sentence
+
+    def test_mixed_signal_sentence_for_middle_p_beats_with_one_sided_delta(
+        self,
+    ) -> None:
+        """Direct test: P(beats) in the middle band but delta CI fully
+        positive routes to the 'mixed signal' bucket."""
+        from wanamaker.forecast.scenarios import _interpretation_sentence
+
+        sentence = _interpretation_sentence(
+            is_baseline=False,
+            plan_name="alt",
+            extrapolation_flags=[],
+            spend_invariant_channels=[],
+            probability_beats_baseline=0.55,
+            probability_material_loss=0.05,
+            delta_hdi_low=10.0,  # entirely above zero — but P(beats) is mid
+            delta_hdi_high=200.0,
+        )
+        assert "mixed signal" in sentence.lower()
+
+
+class TestGracefulFallbackWithoutDraws:
+    """When the stub engine returns no per-draw matrix, the new fields
+    fall back to neutral defaults instead of crashing. The original
+    StubEngine in this file does not produce draws, so this is the
+    backward-compat path."""
+
+    def test_probabilities_fall_back_to_neutral_without_draws(self) -> None:
+        plans = [_wide_plan([20.0], [100.0]), _wide_plan([40.0], [100.0])]
+        results = compare_scenarios(_summary(), plans, seed=0, engine=StubEngine())
+        non_baseline = next(r for r in results if not r.is_baseline)
+        assert non_baseline.probability_beats_baseline == 0.5
+        assert non_baseline.probability_material_loss == 0.0
+        # Delta fields are zero (the function can't compute paired
+        # comparison without draws).
+        assert non_baseline.delta_vs_baseline_mean == 0.0
+
+
+class TestPerDrawHelpers:
+    def test_per_draw_totals_accepts_array_like_draws(self) -> None:
+        from wanamaker.forecast.scenarios import _per_draw_totals
+
+        result = PredictiveSummary(
+            periods=["p1", "p2"],
+            mean=[1.0, 2.0],
+            hdi_low=[0.0, 1.0],
+            hdi_high=[2.0, 3.0],
+            draws=[[1.0, 2.0], [3.0, 4.0]],
+        )
+
+        assert _per_draw_totals(result).tolist() == [3.0, 7.0]
+
+    def test_hdi_uses_shortest_interval_not_equal_tailed_quantiles(self) -> None:
+        from wanamaker.forecast.scenarios import _hdi
+
+        low, high = _hdi(
+            # Shortest 80% interval is [0, 3], not an interpolated
+            # equal-tailed interval that would include part of the outlier gap.
+            values=pd.Series([0.0, 1.0, 2.0, 3.0, 100.0]).to_numpy(),
+            mass=0.8,
+        )
+
+        assert (low, high) == (0.0, 3.0)
+
+
+class TestNoBannedTerminology:
+    """The interpretation sentences must not leak optimizer language."""
+
+    def test_no_banned_phrases_in_any_interpretation(self) -> None:
+        # Mirrors AGENTS.md → "Product terminology" and the canonical
+        # list in tests/unit/test_terminology_guardrails.py. Defined
+        # locally because tests/ is not a package.
+        banned_phrases = (
+            "optimized budget",
+            "optimal allocation",
+            "best budget",
+            "guaranteed lift",
+            "maximize roi",
+        )
+
+        plans = [
+            _wide_plan([20.0], [100.0]),
+            _wide_plan([40.0], [100.0]),
+            _wide_plan([60.0], [100.0]),  # extrapolation
+        ]
+        # Cover the spend-invariant branch too.
+        for spend_invariant in (True, False):
+            results = compare_scenarios(
+                _summary(spend_invariant_tv=spend_invariant),
+                plans, seed=0, engine=DrawsStubEngine(),
+            )
+            for r in results:
+                lowered = r.interpretation.lower()
+                for phrase in banned_phrases:
+                    assert phrase not in lowered, (
+                        f"interpretation for {r.plan_name!r} contains "
+                        f"banned phrase {phrase!r}: {r.interpretation!r}"
+                    )
