@@ -1,0 +1,96 @@
+{# Trust Card one-pager template (executive-facing).
+
+   Required context keys (built by build_trust_card_one_pager_context):
+     - title, run_id, generated_at, package_version, run_fingerprint
+     - period_start, period_end, n_periods
+     - verdict: {status, label, sentence}
+     - dimensions: list of {name_label, status, sentence}
+     - decisions: list of {dimension_label, sentence}  (only weak ones)
+
+   Voice: dry, direct, no jargon. The plain-English guard test asserts
+   that none of the strings in JARGON_BLACKLIST appear in the rendered
+   output.
+#}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{{ title }}</title>
+<style>
+{{ stylesheet | safe }}
+</style>
+</head>
+<body>
+<main>
+
+<header class="wmk-card-header">
+  <p class="wmk-eyebrow">Model Trust Card</p>
+  <h1>{{ title }}</h1>
+  <p class="wmk-meta">
+    Period <strong>{{ period_start }}</strong> – <strong>{{ period_end }}</strong>
+    ({{ n_periods }} periods) · Generated {{ generated_at }}
+  </p>
+</header>
+
+<section class="wmk-verdict wmk-verdict--{{ verdict.status }}">
+  <span class="wmk-verdict__pill wmk-pill--{{ verdict.status }}">
+    {{ verdict.label }}
+  </span>
+  <p class="wmk-verdict__sentence">{{ verdict.sentence }}</p>
+</section>
+
+<section class="wmk-card-section" id="dimensions">
+  <h2>What we checked</h2>
+  <div class="wmk-dim-grid">
+    {% for d in dimensions %}
+    <div class="wmk-dim">
+      <div class="wmk-dim__head">
+        <span class="wmk-dim__name">{{ d.name_label }}</span>
+        <span class="wmk-dim__pill wmk-pill--{{ d.status }}">{{ d.status }}</span>
+      </div>
+      <p class="wmk-dim__text">{{ d.sentence }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="wmk-card-section" id="decisions">
+  <h2>What this means for decisions</h2>
+  {% if decisions %}
+  <ul class="wmk-decisions">
+    {% for d in decisions %}
+    <li><strong>{{ d.dimension_label }}:</strong> {{ d.sentence }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <ul class="wmk-decisions">
+    <li>
+      Use this analysis as you would any well-fit decision input. The
+      checks above are clean enough that the model's recommendations
+      can be acted on with normal caution.
+    </li>
+  </ul>
+  {% endif %}
+</section>
+
+<section class="wmk-card-section" id="not-covered">
+  <h2>What this card does not cover</h2>
+  <p class="wmk-caveat">
+    The Trust Card surfaces failure modes the model can detect from the
+    fit itself. It does not attest to data quality before the fit, the
+    accuracy of channel categorisation, off-policy validity (whether
+    historical patterns will hold under a very different plan), or
+    whether the marketing context matches the assumptions the model was
+    built on. Use it alongside business judgment, not in place of it.
+  </p>
+</section>
+
+<footer class="wmk-card-footer">
+  <span>Run <code>{{ run_id }}</code></span>
+  <span>Fingerprint <code>{{ run_fingerprint }}</code></span>
+  <span>wanamaker {{ package_version }}</span>
+</footer>
+
+</main>
+</body>
+</html>

@@ -6,6 +6,7 @@ Core commands per FR-6.3 plus the HTML showcase:
     wanamaker fit --config <config.yaml>
     wanamaker report --run-id <run_id>
     wanamaker showcase --run-id <run_id>
+    wanamaker trust-card --run-id <run_id>
     wanamaker forecast --run-id <run_id> --plan <plan.csv>
     wanamaker compare-scenarios --run-id <run_id> --plans <p1.csv> <p2.csv> ...
     wanamaker recommend-ramp --run-id <run_id> --baseline <base.csv> --target <alt.csv>
@@ -592,6 +593,123 @@ def showcase(
         webbrowser.open(output_path.resolve().as_uri())
 
 
+@app.command(name="trust-card")
+def trust_card(
+    run_id: str = typer.Option(..., "--run-id"),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Path to save the one-pager HTML. Default: <run_dir>/trust_card.html",
+    ),
+    title: str | None = typer.Option(
+        None,
+        "--title",
+        help=(
+            "Override the one-pager title. "
+            "Default: 'Wanamaker MMM — <run_id short>'."
+        ),
+    ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help="Open the rendered one-pager in the default browser when done.",
+    ),
+) -> None:
+    """Render the executive-facing Trust Card one-pager for a completed run.
+
+    The one-pager is a single self-contained HTML file designed for
+    forwarding to non-technical executives. It prints to a single page
+    on US Letter or A4 and uses plain-English translations of each
+    Trust Card dimension instead of the analyst-facing technical text.
+    """
+    import webbrowser
+    from datetime import datetime, timezone
+
+    from wanamaker import __version__
+    from wanamaker.artifacts import (
+        deserialize_refresh_diff,
+        deserialize_summary,
+        load_manifest,
+        run_paths,
+    )
+    from wanamaker.config import load_config
+    from wanamaker.reports import (
+        build_trust_card_one_pager_context,
+        render_trust_card_one_pager,
+    )
+    from wanamaker.trust_card.compute import build_trust_card
+
+    paths = run_paths(artifact_dir, run_id)
+    if not paths.config.exists():
+        typer.echo(
+            typer.style(
+                f"Error: run {run_id!r} not found in {artifact_dir / 'runs'}. "
+                "Run 'wanamaker fit' first or check --artifact-dir.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not paths.summary.exists():
+        typer.echo(
+            typer.style(
+                f"Error: summary.json missing for run {run_id!r} at {paths.summary}.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    summary = deserialize_summary(paths.summary.read_text())
+
+    refresh_diff = None
+    if paths.refresh_diff.exists():
+        refresh_diff = deserialize_refresh_diff(paths.refresh_diff.read_text())
+
+    cfg = load_config(paths.config)
+    lift_test_priors = _load_lift_priors_if_any(cfg)
+
+    card = build_trust_card(
+        summary,
+        refresh_diff=refresh_diff,
+        lift_test_priors=lift_test_priors,
+    )
+
+    run_fingerprint = ""
+    if paths.manifest.exists():
+        try:
+            manifest = load_manifest(paths.manifest.read_text())
+            run_fingerprint = str(manifest.get("run_fingerprint", ""))
+        except ValueError:
+            run_fingerprint = ""
+
+    context = build_trust_card_one_pager_context(
+        summary,
+        card,
+        title=title or f"Wanamaker MMM — {run_id[:8]}",
+        run_id=run_id,
+        generated_at=datetime.now(timezone.utc),
+        package_version=__version__,
+        run_fingerprint=run_fingerprint,
+    )
+
+    html = render_trust_card_one_pager(context)
+
+    output_path = output if output is not None else paths.root / "trust_card.html"
+    output_path.write_text(html, encoding="utf-8")
+    typer.echo(
+        typer.style(f"Trust Card one-pager saved: {output_path}", fg=typer.colors.GREEN)
+    )
+
+    if open_browser:
+        webbrowser.open(output_path.resolve().as_uri())
+
+
 _RUN_EXAMPLES: tuple[str, ...] = ("public_benchmark",)
 
 
@@ -707,6 +825,13 @@ def run(
         output=None,
         title=None,
         scenario=None,
+        open_browser=False,
+    )
+    trust_card(
+        run_id=run_id,
+        artifact_dir=artifact_dir,
+        output=None,
+        title=None,
         open_browser=False,
     )
     typer.echo("")
