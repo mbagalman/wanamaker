@@ -69,18 +69,7 @@ def diagnose(
     """Run the pre-flight data readiness diagnostic (FR-2.1)."""
     import pandas as pd
 
-    from wanamaker.diagnose.checks import (
-        check_collinearity,
-        check_date_regularity,
-        check_history_length,
-        check_missing_values,
-        check_spend_variation,
-        check_structural_breaks,
-        check_target_leakage,
-        check_target_stability,
-        check_variable_count,
-    )
-    from wanamaker.diagnose.readiness import CheckResult, CheckSeverity, ReadinessLevel
+    from wanamaker.diagnose.readiness import CheckSeverity, ReadinessLevel
 
     # ------------------------------------------------------------------
     # 1. Load CSV (needed before column inference)
@@ -147,52 +136,18 @@ def diagnose(
     # ------------------------------------------------------------------
     # 3. Run checks, tolerating NotImplementedError for unfinished ones
     # ------------------------------------------------------------------
-    results: list[CheckResult] = []
-
-    def _try(fn, *args, **kwargs) -> None:  # type: ignore[type-arg]
-        try:
-            out = fn(*args, **kwargs)
-            if isinstance(out, list):
-                results.extend(out)
-            elif out is not None:
-                results.append(out)
-        except NotImplementedError:
-            pass
-        except (KeyError, ValueError) as exc:
-            results.append(
-                CheckResult(
-                    name=fn.__name__.removeprefix("check_"),
-                    severity=CheckSeverity.WARNING,
-                    message=f"Check skipped — {exc}",
-                )
-            )
-
-    _try(check_history_length, df, resolved_date_col)
-    _try(check_date_regularity, df, resolved_date_col)
-    _try(check_missing_values, df)
-    _try(check_target_stability, df, resolved_target_col)
-    _try(check_structural_breaks, df, resolved_target_col, resolved_date_col)
-
-    # Spend-aware checks — only when column lists are known (config path)
-    if resolved_spend_cols:
-        _try(check_spend_variation, df, resolved_spend_cols)
-        _try(check_collinearity, df, resolved_spend_cols, resolved_control_cols)
-        _try(check_variable_count, df, resolved_spend_cols, resolved_control_cols)
-    if resolved_control_cols and resolved_target_col:
-        _try(check_target_leakage, df, resolved_target_col, resolved_control_cols)
+    results = _run_readiness_checks(
+        df,
+        target_column=resolved_target_col,
+        date_column=resolved_date_col,
+        spend_columns=resolved_spend_cols,
+        control_columns=resolved_control_cols,
+    )
 
     # ------------------------------------------------------------------
     # 4. Determine readiness level
     # ------------------------------------------------------------------
-    blockers = [r for r in results if r.severity == CheckSeverity.BLOCKER]
-    warnings = [r for r in results if r.severity == CheckSeverity.WARNING]
-
-    if blockers:
-        level = ReadinessLevel.NOT_RECOMMENDED
-    elif warnings:
-        level = ReadinessLevel.USABLE_WITH_WARNINGS
-    else:
-        level = ReadinessLevel.READY
+    level = _readiness_level_from_results(results)
 
     # ------------------------------------------------------------------
     # 5. Print report
@@ -699,50 +654,137 @@ def _infer_columns(df: object) -> tuple[str | None, str | None]:
 
 
 def _run_diagnostics(data: object, cfg: object) -> str:
-    """Run available diagnostic checks and return a ``ReadinessLevel`` string.
+    """Run the implemented readiness suite for ``fit`` / ``refresh``.
 
-    Checks that are not yet implemented (raise ``NotImplementedError``) are
-    silently skipped so the fit command works as more checks land in
-    issues #12 and #13.
+    Calls the same shared check-runner used by ``wanamaker diagnose`` so
+    the gate that decides whether to write run artifacts sees every
+    available signal — history length, date regularity, missing values,
+    target stability, structural breaks, and (with config in hand)
+    spend variation, collinearity, variable count, and target leakage.
+
+    Returns the resulting ``ReadinessLevel`` as a string and prints any
+    blockers / warnings to stdout. ``--skip-validation`` remains the
+    explicit opt-out path (handled by the caller).
     """
     import pandas as pd
 
     from wanamaker.config import WanamakerConfig
-    from wanamaker.diagnose.checks import check_structural_breaks
-    from wanamaker.diagnose.readiness import CheckSeverity, CheckResult, ReadinessLevel
+    from wanamaker.diagnose.readiness import CheckSeverity
 
     assert isinstance(data, pd.DataFrame)
     assert isinstance(cfg, WanamakerConfig)
 
-    results: list[CheckResult] = []
+    results = _run_readiness_checks(
+        data,
+        target_column=cfg.data.target_column,
+        date_column=cfg.data.date_column,
+        spend_columns=list(cfg.data.spend_columns or []),
+        control_columns=list(cfg.data.control_columns or []),
+    )
+    level = _readiness_level_from_results(results)
 
-    # Structural-break check (implemented in issue #14)
-    try:
-        results.extend(
-            check_structural_breaks(data, cfg.data.target_column, cfg.data.date_column)
-        )
-    except NotImplementedError:
-        pass
-
-    # Future checks (issues #12 and #13) will extend this list.
-
-    blockers = [r for r in results if r.severity == CheckSeverity.BLOCKER]
-    warnings = [r for r in results if r.severity == CheckSeverity.WARNING]
-
-    if blockers:
-        level = ReadinessLevel.NOT_RECOMMENDED
-    elif warnings:
-        level = ReadinessLevel.USABLE_WITH_WARNINGS
-    else:
-        level = ReadinessLevel.READY
-
-    if warnings or blockers:
-        for r in results:
-            colour = typer.colors.RED if r.severity == CheckSeverity.BLOCKER else typer.colors.YELLOW
-            typer.echo(typer.style(f"  [{r.severity.value.upper()}] {r.message}", fg=colour))
+    for r in results:
+        if r.severity in (CheckSeverity.BLOCKER, CheckSeverity.WARNING):
+            colour = (
+                typer.colors.RED if r.severity == CheckSeverity.BLOCKER
+                else typer.colors.YELLOW
+            )
+            typer.echo(
+                typer.style(
+                    f"  [{r.severity.value.upper()}] {r.message}", fg=colour,
+                )
+            )
 
     typer.echo(f"Readiness: {level.value}")
     return level.value
+
+
+def _run_readiness_checks(
+    df: object,
+    *,
+    target_column: str | None,
+    date_column: str | None,
+    spend_columns: list[str] | None = None,
+    control_columns: list[str] | None = None,
+) -> list[Any]:
+    """Run the full implemented readiness suite against ``df``.
+
+    Spend-aware checks (variation, collinearity, variable count) only run
+    when ``spend_columns`` is non-empty; target-leakage runs only when
+    both ``control_columns`` and ``target_column`` are present. Checks
+    that raise ``NotImplementedError`` are silently skipped (so this
+    helper degrades gracefully against future check rollouts).
+    ``KeyError`` / ``ValueError`` from a single check become an inline
+    WARNING — the user gets a clear "this check was skipped" line rather
+    than a crash that masks every other check's results.
+    """
+    import pandas as pd
+
+    from wanamaker.diagnose.checks import (
+        check_collinearity,
+        check_date_regularity,
+        check_history_length,
+        check_missing_values,
+        check_spend_variation,
+        check_structural_breaks,
+        check_target_leakage,
+        check_target_stability,
+        check_variable_count,
+    )
+    from wanamaker.diagnose.readiness import CheckResult, CheckSeverity
+
+    assert isinstance(df, pd.DataFrame)
+
+    results: list[CheckResult] = []
+
+    def _try(fn: Any, *args: Any, **kwargs: Any) -> None:
+        try:
+            out = fn(*args, **kwargs)
+            if isinstance(out, list):
+                results.extend(out)
+            elif out is not None:
+                results.append(out)
+        except NotImplementedError:
+            pass
+        except (KeyError, ValueError) as exc:
+            results.append(
+                CheckResult(
+                    name=fn.__name__.removeprefix("check_"),
+                    severity=CheckSeverity.WARNING,
+                    message=f"Check skipped — {exc}",
+                )
+            )
+
+    _try(check_history_length, df, date_column)
+    _try(check_date_regularity, df, date_column)
+    _try(check_missing_values, df)
+    _try(check_target_stability, df, target_column)
+    _try(check_structural_breaks, df, target_column, date_column)
+
+    if spend_columns:
+        _try(check_spend_variation, df, spend_columns)
+        _try(check_collinearity, df, spend_columns, control_columns or [])
+        _try(check_variable_count, df, spend_columns, control_columns or [])
+    if control_columns and target_column:
+        _try(check_target_leakage, df, target_column, control_columns)
+
+    return results
+
+
+def _readiness_level_from_results(results: list[Any]) -> Any:
+    """Map a list of ``CheckResult`` to a ``ReadinessLevel``.
+
+    BLOCKER → NOT_RECOMMENDED · WARNING → USABLE_WITH_WARNINGS · else READY.
+    """
+    from wanamaker.diagnose.readiness import CheckSeverity, ReadinessLevel
+
+    blockers = [r for r in results if r.severity == CheckSeverity.BLOCKER]
+    warnings = [r for r in results if r.severity == CheckSeverity.WARNING]
+    if blockers:
+        return ReadinessLevel.NOT_RECOMMENDED
+    if warnings:
+        return ReadinessLevel.USABLE_WITH_WARNINGS
+    return ReadinessLevel.READY
 
 
 def _analytical_config_hash(cfg: object, hash_config_fn: object) -> str:
