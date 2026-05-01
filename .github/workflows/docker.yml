@@ -1,0 +1,66 @@
+name: Docker image
+
+# Builds the Wanamaker Docker image and verifies it runs the bundled
+# one-command demo end-to-end. FR-6.2 also calls for publishing the
+# image to Docker Hub as ``wanamaker/wanamaker:<version>``; the publish
+# step is intentionally deferred until before v1.0 (it requires a
+# Docker Hub account + GitHub secrets).
+#
+# Triggers: push to master, release tags ``v*``, manual dispatch. PRs
+# are intentionally excluded — building the image and running the full
+# demo inside it is much slower than the unit-test job that already
+# runs on PRs.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke-test:
+    name: Build image, run --example public_benchmark inside it
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: wanamaker:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image size is under 3 GB (FR-6.2)
+        run: |
+          set -euo pipefail
+          # ``docker image inspect`` reports size in bytes.
+          size_bytes=$(docker image inspect wanamaker:ci --format '{{.Size}}')
+          size_mb=$((size_bytes / 1024 / 1024))
+          echo "wanamaker:ci size = ${size_mb} MB"
+          # 3 GB ceiling per FR-6.2.
+          if [ "$size_mb" -gt 3072 ]; then
+            echo "::error::Image size ${size_mb} MB exceeds the 3 GB FR-6.2 ceiling"
+            exit 1
+          fi
+
+      - name: Smoke-test the entry point
+        run: docker run --rm wanamaker:ci --help
+
+      - name: Smoke-test a subcommand wired through the entry point
+        run: docker run --rm wanamaker:ci diagnose --help
+
+      - name: Run the bundled one-command demo end-to-end
+        # Exercises the full diagnose -> fit -> report flow inside the
+        # image so a regression in the build (missing dep, broken
+        # pytensor compile, dropped package data) shows up here. The
+        # quick-mode fit completes in a few minutes.
+        run: docker run --rm wanamaker:ci run --example public_benchmark

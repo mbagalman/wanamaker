@@ -1,0 +1,43 @@
+# Keep the Docker build context small. Anything not directly needed by
+# ``pip install .`` is excluded so each ``docker build`` doesn't have
+# to rsync the whole repo into the build daemon.
+
+# Version control + IDE
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+
+# Python build artefacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+build
+dist
+.wanamaker
+
+# Tests, docs, and benchmark/dev data — none of which the runtime
+# image needs. The bundled public_benchmark example lives inside
+# ``src/wanamaker/_examples/`` and is included via the package, not
+# via this top-level directory.
+tests
+docs
+benchmark_data
+mkdocs.yml
+AGENTS.md
+.editorconfig
+
+# Local virtualenvs / tool caches some contributors carry around
+.venv
+venv
+env
+node_modules
