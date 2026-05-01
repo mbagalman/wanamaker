@@ -262,6 +262,8 @@ purpose-built tool like Wanamaker does not support.
 | **Refresh diff + accountability** | No | No | Partial | No | Yes |
 | **Trust Card / credibility audit** | No | No | Partial | No | Yes |
 | **Executive summary output** | Partial | No | Yes | No | Yes |
+| **Self-contained HTML stakeholder report** | No | No | Yes (web UI) | No | Yes |
+| **Risk-adjusted allocation ramp** | No | No | Partial | No | Yes |
 | **Lift-test calibration** | Yes | Yes | Yes | Yes | Yes |
 | **Budget optimizer** | Yes (mature) | Partial | Yes | No | No (v1) |
 | **Installation complexity** | Low (R) / Medium (Python) | High (JAX/GPU) | None (SaaS) | Low | Low |
