@@ -1,0 +1,264 @@
+/* trust_card_one_pager stylesheet — inlined into the HTML <style> block.
+   No external fonts, no CDN, no JS. Designed to print to a single page on
+   either US Letter or A4 via @page size: auto.
+*/
+:root {
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --bg: #ffffff;
+  --bg-soft: #f8fafc;
+  --primary: #2b5876;
+  --pass: #059669;
+  --pass-soft: #ecfdf5;
+  --moderate: #d97706;
+  --moderate-soft: #fff7ed;
+  --weak: #dc2626;
+  --weak-soft: #fef2f2;
+}
+
+@page {
+  size: auto;
+  margin: 0.5in;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 32px 40px;
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* Header ---------------------------------------------------------------- */
+
+header.wmk-card-header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 28px;
+}
+
+header.wmk-card-header .wmk-eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 0 0 6px 0;
+}
+
+header.wmk-card-header h1 {
+  font-size: 26px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+header.wmk-card-header .wmk-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Verdict band — the headline call ------------------------------------- */
+
+section.wmk-verdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 24px 28px;
+  border-radius: 8px;
+  margin: 0 0 32px 0;
+}
+
+.wmk-verdict--pass {
+  background: var(--pass-soft);
+  border: 1px solid var(--pass);
+}
+
+.wmk-verdict--moderate {
+  background: var(--moderate-soft);
+  border: 1px solid var(--moderate);
+}
+
+.wmk-verdict--weak {
+  background: var(--weak-soft);
+  border: 1px solid var(--weak);
+}
+
+.wmk-verdict__pill {
+  display: inline-block;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wmk-pill--pass {
+  background: white;
+  color: var(--pass);
+  border: 2px solid var(--pass);
+}
+
+.wmk-pill--moderate {
+  background: white;
+  color: var(--moderate);
+  border: 2px solid var(--moderate);
+}
+
+.wmk-pill--weak {
+  background: white;
+  color: var(--weak);
+  border: 2px solid var(--weak);
+}
+
+.wmk-verdict__sentence {
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--ink);
+}
+
+/* Section structure ---------------------------------------------------- */
+
+section.wmk-card-section {
+  margin: 0 0 32px 0;
+}
+
+section.wmk-card-section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 14px 0;
+}
+
+/* Six-dimension status strip ------------------------------------------- */
+
+.wmk-dim-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.wmk-dim {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 16px;
+  background: var(--bg);
+}
+
+.wmk-dim__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.wmk-dim__name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.wmk-dim__pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wmk-dim__text {
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  color: var(--ink);
+}
+
+/* Decisions block ------------------------------------------------------ */
+
+ul.wmk-decisions {
+  margin: 0;
+  padding: 0 0 0 20px;
+}
+
+ul.wmk-decisions li {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+ul.wmk-decisions li strong {
+  font-weight: 600;
+}
+
+/* Caveat paragraph + footer ------------------------------------------- */
+
+p.wmk-caveat {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+footer.wmk-card-footer {
+  margin-top: 36px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+footer.wmk-card-footer code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+@media print {
+  body {
+    background: white;
+  }
+  main {
+    box-shadow: none;
+    max-width: none;
+    padding: 0;
+  }
+  /* Tighter spacing in print so the page doesn't break awkwardly. */
+  section.wmk-verdict {
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  section.wmk-card-section {
+    margin-bottom: 20px;
+  }
+}

@@ -20,14 +20,20 @@ from wanamaker.reports.render import (
     render_trust_card,
 )
 from wanamaker.reports.showcase import build_showcase_context, render_showcase
+from wanamaker.reports.trust_card_one_pager import (
+    build_trust_card_one_pager_context,
+    render_trust_card_one_pager,
+)
 
 __all__ = [
     "build_executive_summary_context",
     "build_ramp_recommendation_context",
     "build_showcase_context",
     "build_trust_card_context",
+    "build_trust_card_one_pager_context",
     "render_executive_summary",
     "render_ramp_recommendation",
     "render_showcase",
     "render_trust_card",
+    "render_trust_card_one_pager",
 ]
