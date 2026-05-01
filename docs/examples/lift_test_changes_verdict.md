@@ -103,8 +103,8 @@ weight on the experiment.
 ## Step 3 — Refit with calibration
 
 Write a calibrated config that points at the lift-test CSV. Use the
-same fields as the uncalibrated config plus a `lift_test_csv` entry
-under `data:`:
+same fields as the uncalibrated config plus a `calibration.lift_tests`
+section:
 
 ```bash
 cat > tutorial_data/config_calibrated.yaml <<'EOF'

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from wanamaker.cli import _load_lift_priors_if_any
 from wanamaker.config import (
     CalibrationConfig,
     ChannelConfig,
@@ -178,7 +179,7 @@ def test_build_model_spec_uses_calibration_config_priors(tmp_path: Path) -> None
         "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
         "search,2024-01-01,2024-01-14,2.0,1.216014,2.783986\n",
     )
-    
+
     cfg = WanamakerConfig(
         data=DataConfig(
             csv_path=data_csv,
@@ -191,11 +192,40 @@ def test_build_model_spec_uses_calibration_config_priors(tmp_path: Path) -> None
             lift_tests=LiftTestCalibrationConfig(path=lift_csv)
         ),
     )
-    
+
     spec = build_model_spec(cfg)
     assert set(spec.lift_test_priors) == {"search"}
     prior = spec.lift_test_priors["search"]
     assert prior.mean_roi == pytest.approx(2.0)
+
+
+def test_cli_lift_prior_helper_uses_calibration_config(tmp_path: Path) -> None:
+    data_csv = tmp_path / "data.csv"
+    data_csv.write_text("week,revenue,search\n2024-01-01,100,10\n", encoding="utf-8")
+    lift_csv = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+        "search,2024-01-01,2024-01-14,2.0,1.216014,2.783986\n",
+    )
+
+    cfg = WanamakerConfig(
+        data=DataConfig(
+            csv_path=data_csv,
+            date_column="week",
+            target_column="revenue",
+            spend_columns=["search"],
+        ),
+        channels=[ChannelConfig(name="search", category="paid_search")],
+        calibration=CalibrationConfig(
+            lift_tests=LiftTestCalibrationConfig(path=lift_csv)
+        ),
+    )
+
+    priors = _load_lift_priors_if_any(cfg)
+
+    assert priors is not None
+    assert set(priors) == {"search"}
+    assert priors["search"].mean_roi == pytest.approx(2.0)
 
 
 def test_config_rejects_conflicting_lift_test_paths(tmp_path: Path) -> None:
@@ -207,7 +237,7 @@ def test_config_rejects_conflicting_lift_test_paths(tmp_path: Path) -> None:
         "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n",
         encoding="utf-8",
     )
-    
+
     with pytest.raises(ValueError, match="Cannot specify both"):
         WanamakerConfig(
             data=DataConfig(
