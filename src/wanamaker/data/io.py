@@ -6,9 +6,8 @@ See FR-1.1 in the BRD/PRD for the contract.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import warnings
+from pathlib import Path
 
 import pandas as pd
 
