@@ -2,7 +2,11 @@
 
 **Audience:** Developers and AI coding assistants working on the codebase.
 **Companion documents:** [`docs/wanamaker_brd_prd.md`](wanamaker_brd_prd.md) (what and why), [`AGENTS.md`](https://github.com/mbagalman/wanamaker/blob/main/AGENTS.md) (hard rules and coding conventions).
-**Status:** Phase 0 / entering Phase 1. PyMC backend implemented and tested; core transforms, model spec, config, artifacts, diagnose, and refresh diff are all fully implemented. Active work is on forecast, trust card, reports, and remaining CLI commands.
+**Status:** Active pre-1.0 development. PyMC backend, transforms, model spec,
+config, artifacts, diagnose, refresh diff, forecasting, scenario comparison,
+risk-adjusted ramp recommendations, Trust Card, reports, and the public CLI
+workflow are implemented. Active work is on hardening benchmarks, release
+packaging, and deferred supporting-role xgboost paths.
 
 ---
 
@@ -70,8 +74,10 @@ The CLI is intentionally thin. Each command resolves configuration, then delegat
 | `wanamaker diagnose <data.csv> [--config]` | `wanamaker.diagnose` |
 | `wanamaker fit --config <config.yaml>` | `wanamaker.model`, `wanamaker.engine` |
 | `wanamaker report --run-id <id>` | `wanamaker.reports` |
+| `wanamaker run --example public_benchmark` | `wanamaker.diagnose`, `wanamaker.model`, `wanamaker.reports` |
 | `wanamaker forecast --run-id <id> --plan <plan.csv>` | `wanamaker.forecast` |
 | `wanamaker compare-scenarios --run-id <id> --plans ...` | `wanamaker.forecast` |
+| `wanamaker recommend-ramp --run-id <id> --baseline <base.csv> --target <target.csv>` | `wanamaker.forecast` |
 | `wanamaker refresh --config <config.yaml>` | `wanamaker.refresh`, `wanamaker.engine` |
 
 **`diagnose` accepts an optional `--config`:** Without it, only checks that do not require column knowledge run (history length, date regularity, structural breaks), with a warning. With it, all checks run including spend variation and collinearity. This matches the progressive disclosure model: a user exploring a new CSV does not need a config yet.
@@ -495,7 +501,10 @@ The user-facing API has three layers (FR-7), each providing full access:
 | 2 -- Guided config | YAML with full `WanamakerConfig` schema | Channel categories, business constraints, lift test path, runtime mode, anchor strength |
 | 3 -- Expert overrides | Python API | Direct `ModelSpec`, prior overrides, custom transforms, raw `Posterior` objects, sampler tuning |
 
-A new user should be able to go from `pip install wanamaker` to a complete executive summary in under 30 minutes following only the quickstart documentation (FR-7.1 acceptance criterion).
+A new user should be able to go from source checkout today, and eventually
+`pip install wanamaker` after release, to a complete executive summary in under
+30 minutes following only the quickstart documentation (FR-7.1 acceptance
+criterion).
 
 ---
 
@@ -503,7 +512,7 @@ A new user should be able to go from `pip install wanamaker` to a complete execu
 
 All outputs go to `.wanamaker/` in the project directory (FR-Privacy.2). Nothing is written to the user's home directory or any system path by default. The `artifact_dir` can be overridden via `config.run.artifact_dir` or a CLI flag.
 
-**No network calls in any core code path.** Enforced by `tests/test_no_network_in_core.py`, which walks the import graph of all core subpackages at import time and fails the build if any banned module appears. This is an **import-time guardrail** -- it catches modules imported at module load but does not catch optional or lazy imports inside functions until those functions execute. A planned companion test (to be added in Phase 2) will run each of the six core commands in a network-isolated container and compare output.
+**No network calls in any core code path.** Enforced by `tests/test_no_network_in_core.py`, which walks the import graph of all core subpackages at import time and fails the build if any banned module appears. This is an **import-time guardrail** -- it catches modules imported at module load but does not catch optional or lazy imports inside functions until those functions execute. The companion runtime gate, `tests/test_network_isolation.py`, exercises the primary core workflow in a network-isolated environment when engine tests are enabled.
 
 **`manifest.json`** is the run manifest written to every run directory. It records:
 - `run_id` (unique per execution)
@@ -517,21 +526,21 @@ All outputs go to `.wanamaker/` in the project directory (FR-Privacy.2). Nothing
 
 ---
 
-## 7. What Is Built vs. Stubbed
+## 7. What Is Built vs. Deferred
 
 | Module | Status | Phase |
 |---|---|---|
-| `cli.py` | **Implemented** -- `diagnose` and `fit` wired up; `report`, `forecast`, `compare-scenarios`, `refresh` stub | Phase 1-2 |
-| `config.py` | **Implemented** -- full pydantic schema | Done |
+| `cli.py` | **Implemented** -- `diagnose`, `fit`, `report`, `run`, `forecast`, `compare-scenarios`, `recommend-ramp`, and `refresh` | Done |
+| `config.py` | **Implemented** -- strict pydantic schema | Done |
 | `seeding.py` | **Implemented** -- `make_rng` and `derive_seed` | Done |
-| `artifacts.py` | **Implemented** -- directory layout, fingerprint/run_id, versioned envelopes for all JSON artifacts, `list_runs`, `load_manifest` | Done |
-| `data/io.py` | **Partial** -- `load_input_csv` works; `load_lift_test_csv` stubbed | Phase 1 |
+| `artifacts.py` | **Implemented** -- directory layout, fingerprint/run_id, versioned envelopes for summary, Trust Card, refresh diff, and ramp recommendation artifacts, `list_runs`, `load_manifest` | Done |
+| `data/io.py` | **Implemented** -- input CSV and lift-test CSV loading/validation | Done |
 | `data/taxonomy.py` | **Implemented** -- channel category names | Done |
 | `diagnose/readiness.py` | **Implemented** -- all data structures | Done |
 | `diagnose/checks.py` | **Implemented** -- all 9 checks including structural breaks, collinearity, spend variation, target leakage | Done |
 | `engine/base.py` | **Implemented** -- Protocol, `Posterior`, `FitResult` | Done |
-| `engine/summary.py` | **Implemented** -- all typed summary types | Done |
-| `engine/pymc.py` | **Implemented** -- full PyMC backend; HDI, data-adaptive priors, period labels, convergence | Done |
+| `engine/summary.py` | **Implemented** -- typed summary objects, channel summaries, posterior predictive draws | Done |
+| `engine/pymc.py` | **Implemented** -- PyMC backend; HDI, data-adaptive priors, period labels, convergence, posterior predictive | Done |
 | `transforms/adstock.py` | **Implemented** -- `geometric_adstock` (validated), `weibull_adstock`, `half_life_to_decay` | Done |
 | `transforms/saturation.py` | **Implemented** -- `hill_saturation` (validated, log-space stable) | Done |
 | `model/spec.py` | **Implemented** -- full schema: `ChannelSpec`, `LiftPrior`, `HoldoutConfig`, `SeasonalitySpec`, `AnchoredPrior`, `ModelSpec` | Done |
@@ -540,13 +549,15 @@ All outputs go to `.wanamaker/` in the project directory (FR-Privacy.2). Nothing
 | `refresh/anchor.py` | **Implemented** -- presets, `resolve_anchor_weight` | Done |
 | `refresh/classify.py` | **Implemented** -- `MovementClass` enum, `classify_movement`, `unexplained_fraction` | Done |
 | `refresh/diff.py` | **Implemented** -- `ParameterMovement` (with `movement_class`), `RefreshDiff`, `compute_diff` | Done |
-| `forecast/posterior_predictive.py` | Stubbed | Phase 1 |
-| `forecast/scenarios.py` | Stubbed | Phase 1 |
+| `forecast/posterior_predictive.py` | **Implemented** -- forecast plan loading, spend-range warnings, posterior predictive contract | Done |
+| `forecast/scenarios.py` | **Implemented** -- conservative scenario ranking with caveats | Done |
+| `forecast/ramp.py` | **Implemented** -- risk-adjusted ramp recommendation core | Done |
 | `trust_card/card.py` | **Implemented** -- `TrustStatus`, `TrustDimension`, `TrustCard` frozen dataclasses | Done |
-| `advisor/channel_flagging.py` | Scaffolded -- `ChannelFlag` defined; `flag_channels` stubbed | Phase 2 |
-| `reports/render.py` | **Implemented** -- Jinja2 environment wired; template shells | Templates: Phase 2 |
-| `benchmarks/loaders.py` | **Implemented** -- `load_synthetic_ground_truth()` returns `(DataFrame, dict)` | Done |
-| `_xgboost_aux/` | Empty | Phase 1 |
+| `trust_card/compute.py` | **Implemented** -- Trust Card computation from diagnostics and posterior summaries | Done |
+| `advisor/channel_flagging.py` | **Implemented** -- minimal v1 experiment flagging | Done |
+| `reports/render.py` | **Implemented** -- deterministic Jinja2 Markdown rendering for executive summary, Trust Card, and ramp recommendation | Done |
+| `benchmarks/loaders.py` | **Implemented** -- synthetic and public benchmark loaders | Done |
+| `_xgboost_aux/` | Deferred supporting-role module only; no production xgboost paths yet | Post-v1 hardening |
 
 ---
 
@@ -556,7 +567,7 @@ These are not guidelines -- violating them means rebuilding the project's credib
 
 | Invariant | Enforcement |
 |---|---|
-| No HTTP / telemetry in core code paths | CI test `test_no_network_in_core.py` (import-time); planned network-isolated integration tests (Phase 2) |
+| No HTTP / telemetry in core code paths | CI test `test_no_network_in_core.py` (import-time); runtime gate `test_network_isolation.py` when engine tests are enabled |
 | No LLM calls for output generation | Code review + no LLM SDK in dependencies |
 | No xgboost for ROI / saturation / adstock | AGENTS.md Hard Rule 3; `_xgboost_aux` module isolation |
 | Numerically close reproducibility given same seed (RTOL=1e-6) | NFR-2; `tests/test_reproducibility.py` (enabled with `WANAMAKER_RUN_ENGINE_TESTS=1`) |
@@ -605,7 +616,7 @@ These are not guidelines -- violating them means rebuilding the project's credib
 **CI gates:**
 - `test_no_network_in_core.py` -- runs on every PR; walks core import graph at import time (fast guardrail)
 - `tests/test_reproducibility.py` -- enabled with `WANAMAKER_RUN_ENGINE_TESTS=1`; fits same benchmark twice with same seed, compares all summary floats within RTOL=1e-6 (numerically close, not necessarily bit-for-bit identical across platforms)
-- Network-isolated integration test (planned Phase 2) -- runs each of the 6 core commands in a container without network access and compares output
+- Network-isolated integration test -- runs the primary core workflow without network access when engine tests are enabled
 - Cross-platform install test (planned Phase 2) -- clean-environment pip install on Linux, macOS (Intel + ARM), Windows
 
 ---
@@ -621,4 +632,4 @@ These are not guidelines -- violating them means rebuilding the project's credib
 
 ---
 
-*Last updated: 2026-04-29. Update this document when module responsibilities change, interfaces are finalized, or key decisions land.*
+*Last updated: 2026-05-01. Update this document when module responsibilities change, interfaces are finalized, or key decisions land.*

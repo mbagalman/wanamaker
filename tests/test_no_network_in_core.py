@@ -1,8 +1,7 @@
 """CI gate: core code paths must not import HTTP / network libraries.
 
-Per AGENTS.md Hard Rule 1 and FR-Privacy.1, the core CLI commands
-(``diagnose``, ``fit``, ``report``, ``forecast``, ``compare-scenarios``,
-``refresh``) must not make outbound network calls.
+Per AGENTS.md Hard Rule 1 and FR-Privacy.1, core CLI commands must not make
+outbound network calls.
 
 This test enforces the rule architecturally by walking the import graph
 of every core module and rejecting any transitive import of a known HTTP
@@ -41,7 +40,7 @@ BANNED_MODULES: frozenset[str] = frozenset(
     }
 )
 
-# Subpackages whose code paths back the six core CLI commands.
+# Subpackages whose code paths back the core local workflow.
 CORE_SUBPACKAGES: tuple[str, ...] = (
     "wanamaker.cli",
     "wanamaker.config",

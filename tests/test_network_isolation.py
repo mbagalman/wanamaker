@@ -1,4 +1,4 @@
-"""End-to-end network-isolation gate for the six core CLI commands (#33).
+"""End-to-end network-isolation gate for the primary core CLI workflow (#33).
 
 Per FR-Privacy.1 / AGENTS.md Hard Rule 1, none of ``diagnose``, ``fit``,
 ``report``, ``forecast``, ``compare-scenarios``, or ``refresh`` may make
@@ -159,7 +159,7 @@ def _extract_run_id(output: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_six_core_commands_in_network_isolation(tmp_path: Path) -> None:
+def test_primary_core_workflow_in_network_isolation(tmp_path: Path) -> None:
     """Run ``diagnose`` → ``fit`` → ``report`` → ``forecast`` →
     ``compare-scenarios`` → ``refresh`` end-to-end with outbound network
     blocked, asserting each command exits cleanly and writes its

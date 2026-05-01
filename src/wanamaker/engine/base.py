@@ -43,8 +43,9 @@ class FitResult:
 class Engine(Protocol):
     """The interface every Bayesian engine must satisfy.
 
-    Implementations live alongside this file (e.g., ``engine/pymc.py``) once
-    the Phase -1 decision lands. The protocol is intentionally narrow.
+    Implementations live alongside this file. The production backend is
+    currently ``engine/pymc.py``; the protocol stays intentionally narrow so
+    feature code does not depend on backend-native objects.
     """
 
     name: str
