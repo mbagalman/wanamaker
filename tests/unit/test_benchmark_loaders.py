@@ -5,10 +5,15 @@ from __future__ import annotations
 import pytest
 
 from wanamaker.benchmarks.loaders import (
+    load_collinearity,
+    load_lift_test_calibration,
+    load_low_variation_channel,
     load_public_example,
     load_public_example_metadata,
     load_refresh_stability,
+    load_structural_break,
     load_synthetic_ground_truth,
+    load_target_leakage,
 )
 
 
@@ -73,3 +78,85 @@ def test_refresh_stability_extended_is_base_plus_four_weeks() -> None:
     base, extended, _ = load_refresh_stability()
     head = extended.iloc[: len(base)].reset_index(drop=True)
     assert base.equals(head)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic benchmark loaders (issue #25)
+# ---------------------------------------------------------------------------
+
+
+class TestLowVariationChannel:
+    def test_loader_returns_data_and_metadata(self) -> None:
+        df, metadata = load_low_variation_channel()
+        assert len(df) == metadata["n_weeks"] == 80
+        assert metadata["expected_check_warning"] == "spend_variation"
+        assert metadata["low_variation_channel"] in df.columns
+
+    def test_invariant_channel_actually_has_low_cv(self) -> None:
+        df, metadata = load_low_variation_channel()
+        col = metadata["low_variation_channel"]
+        cv = float(df[col].std(ddof=0) / abs(df[col].mean()))
+        assert cv < 0.10
+        assert metadata["low_variation_cv"] == pytest.approx(cv, rel=1e-3)
+
+
+class TestCollinearity:
+    def test_loader_returns_data_and_metadata(self) -> None:
+        df, metadata = load_collinearity()
+        assert len(df) == metadata["n_weeks"] == 80
+        assert metadata["expected_check_warning"] == "collinearity"
+        assert set(metadata["collinear_pair"]).issubset(df.columns)
+
+    def test_collinear_pair_actually_correlated_above_threshold(self) -> None:
+        df, metadata = load_collinearity()
+        left, right = metadata["collinear_pair"]
+        corr = float(df[[left, right]].corr().iloc[0, 1])
+        assert abs(corr) > 0.95
+
+
+class TestLiftTestCalibration:
+    def test_loader_returns_data_lift_tests_and_metadata(self) -> None:
+        df, lift_tests, metadata = load_lift_test_calibration()
+        assert len(df) == metadata["n_weeks"] == 80
+        assert metadata["lift_test_channel"] == "paid_search"
+        assert lift_tests["channel"].iloc[0] == "paid_search"
+
+    def test_lift_test_ci_brackets_estimate(self) -> None:
+        _, lift_tests, _ = load_lift_test_calibration()
+        row = lift_tests.iloc[0]
+        assert row["ci_lower"] <= row["lift_estimate"] <= row["ci_upper"]
+        # Tight CI — keeps the lift-test prior informative.
+        assert (row["ci_upper"] - row["ci_lower"]) < 1.0
+
+
+class TestTargetLeakage:
+    def test_loader_returns_data_and_metadata(self) -> None:
+        df, metadata = load_target_leakage()
+        assert len(df) == metadata["n_weeks"] == 80
+        assert metadata["expected_check_warning"] == "target_leakage"
+        assert metadata["leakage_control"] in df.columns
+
+    def test_leakage_control_correlates_with_target(self) -> None:
+        df, metadata = load_target_leakage()
+        target = metadata["target_column"]
+        col = metadata["leakage_control"]
+        corr = float(df[[target, col]].corr().iloc[0, 1])
+        assert abs(corr) >= 0.95
+
+
+class TestStructuralBreak:
+    def test_loader_returns_data_and_metadata(self) -> None:
+        df, metadata = load_structural_break()
+        assert len(df) == metadata["n_weeks"] == 80
+        assert metadata["expected_check_warning"] == "structural_breaks"
+        assert 0 < metadata["break_index"] < metadata["n_weeks"]
+
+    def test_break_index_actually_contains_step_change(self) -> None:
+        """Sanity-check the simulated break: pre/post means differ by a lot."""
+        df, metadata = load_structural_break()
+        target = metadata["target_column"]
+        idx = int(metadata["break_index"])
+        pre_mean = float(df[target].iloc[:idx].mean())
+        post_mean = float(df[target].iloc[idx:].mean())
+        # Step is large enough that the diagnostic scan can find it.
+        assert abs(post_mean - pre_mean) > 10000.0

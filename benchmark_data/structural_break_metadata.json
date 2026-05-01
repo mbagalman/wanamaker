@@ -1,0 +1,17 @@
+{
+  "break_date": "2024-10-07",
+  "break_index": 40,
+  "control_columns": [],
+  "dataset": "structural_break",
+  "date_column": "week",
+  "expected_check_warning": "structural_breaks",
+  "n_weeks": 80,
+  "post_baseline": 80000.0,
+  "pre_baseline": 50000.0,
+  "purpose": "Exercises FR-2.2 structural_breaks. A deliberate step change in baseline at week index 40 (60 % jump) is large enough for the binary-segmentation scan to detect.",
+  "spend_columns": [
+    "paid_search",
+    "linear_tv"
+  ],
+  "target_column": "revenue"
+}

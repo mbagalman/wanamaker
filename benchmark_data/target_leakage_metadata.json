@@ -1,0 +1,18 @@
+{
+  "control_columns": [
+    "derived_index",
+    "promo_flag"
+  ],
+  "dataset": "target_leakage",
+  "date_column": "week",
+  "expected_check_warning": "target_leakage",
+  "leakage_control": "derived_index",
+  "leakage_correlation": 0.962677,
+  "n_weeks": 80,
+  "purpose": "Exercises FR-2.2 target_leakage. 'derived_index' is constructed as a noisy linear transform of revenue, producing |corr| >= 0.95 so the check fires.",
+  "spend_columns": [
+    "paid_search",
+    "linear_tv"
+  ],
+  "target_column": "revenue"
+}

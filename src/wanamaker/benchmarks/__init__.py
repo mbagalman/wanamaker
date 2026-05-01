@@ -17,15 +17,25 @@ lazily via these functions.
 """
 
 from wanamaker.benchmarks.loaders import (
+    load_collinearity,
+    load_lift_test_calibration,
+    load_low_variation_channel,
     load_public_example,
     load_public_example_metadata,
     load_refresh_stability,
+    load_structural_break,
     load_synthetic_ground_truth,
+    load_target_leakage,
 )
 
 __all__ = [
+    "load_collinearity",
+    "load_lift_test_calibration",
+    "load_low_variation_channel",
     "load_public_example",
     "load_public_example_metadata",
     "load_refresh_stability",
+    "load_structural_break",
     "load_synthetic_ground_truth",
+    "load_target_leakage",
 ]

@@ -1,0 +1,19 @@
+{
+  "ci_lower": 1.6,
+  "ci_upper": 2.0,
+  "control_columns": [],
+  "dataset": "lift_test_calibration",
+  "date_column": "week",
+  "lift_estimate": 1.8,
+  "lift_test_channel": "paid_search",
+  "lift_tests_csv": "lift_test_calibration_lift_tests.csv",
+  "n_weeks": 80,
+  "purpose": "Exercises FR-1.3 (lift-test prior wiring) and FR-3.3 (recovered ROI close to known lift). The 'paid_search' channel was simulated with a known true ROI; the companion lift-test CSV reports a 95 % CI centred on that value.",
+  "spend_columns": [
+    "paid_search",
+    "linear_tv",
+    "paid_social"
+  ],
+  "target_column": "revenue",
+  "true_roi": 1.8
+}

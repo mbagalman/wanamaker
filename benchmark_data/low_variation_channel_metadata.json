@@ -1,0 +1,17 @@
+{
+  "control_columns": [],
+  "dataset": "low_variation_channel",
+  "date_column": "week",
+  "expected_check_warning": "spend_variation",
+  "low_variation_channel": "static_display",
+  "low_variation_cv": 0.000799,
+  "n_weeks": 80,
+  "purpose": "Exercises FR-2.2 spend_variation and FR-3.2 spend-invariant saturation handling. The 'static_display' channel has CV well below the 0.10 default threshold.",
+  "spend_columns": [
+    "paid_search",
+    "paid_social",
+    "linear_tv",
+    "static_display"
+  ],
+  "target_column": "revenue"
+}

@@ -91,3 +91,87 @@ def load_synthetic_ground_truth() -> tuple[pd.DataFrame, dict]:
     data = pd.read_csv(data_path, parse_dates=["week"])
     truth = json.loads(truth_path.read_text(encoding="utf-8"))
     return data, truth
+
+
+def load_low_variation_channel() -> tuple[pd.DataFrame, dict]:
+    """Return the low-variation-channel diagnostic dataset and its metadata.
+
+    One spend column has CV well below 0.10, exercising
+    ``check_spend_variation`` (FR-2.2) and the spend-invariant saturation
+    handling (FR-3.2).
+    """
+    return _load_diagnostic_dataset("low_variation_channel")
+
+
+def load_collinearity() -> tuple[pd.DataFrame, dict]:
+    """Return the collinearity diagnostic dataset and its metadata.
+
+    Two paid channels are constructed with absolute correlation > 0.95 so
+    ``check_collinearity`` (FR-2.2) fires on the pair.
+    """
+    return _load_diagnostic_dataset("collinearity")
+
+
+def load_lift_test_calibration() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Return the lift-test calibration dataset, its lift-test CSV, and metadata.
+
+    Used to validate FR-1.3 (lift-test prior wiring) and FR-3.3 (recovered
+    ROI within the supplied 95 % CI). One channel has a known true ROI
+    that the companion lift-test CSV reports.
+
+    Returns:
+        ``(data, lift_tests, metadata)``.
+    """
+    data, metadata = _load_diagnostic_dataset(
+        "lift_test_calibration", parse_dates=["week"]
+    )
+    lift_tests_path = BENCHMARK_DIR / "lift_test_calibration_lift_tests.csv"
+    if not lift_tests_path.exists():
+        raise FileNotFoundError(
+            f"lift-test CSV not found at {lift_tests_path}. "
+            "Run benchmark_data/generate_diagnostic_benchmarks.py."
+        )
+    lift_tests = pd.read_csv(lift_tests_path, parse_dates=["test_start", "test_end"])
+    return data, lift_tests, metadata
+
+
+def load_target_leakage() -> tuple[pd.DataFrame, dict]:
+    """Return the target-leakage diagnostic dataset and its metadata.
+
+    A control column is constructed as a near-perfect linear transform of
+    the target so ``check_target_leakage`` (FR-2.2) fires.
+    """
+    return _load_diagnostic_dataset("target_leakage")
+
+
+def load_structural_break() -> tuple[pd.DataFrame, dict]:
+    """Return the structural-break diagnostic dataset and its metadata.
+
+    A deliberate step change in baseline at a known week index gives
+    ``check_structural_breaks`` (FR-2.2) a clear signal to detect.
+    """
+    return _load_diagnostic_dataset("structural_break")
+
+
+def _load_diagnostic_dataset(
+    name: str,
+    *,
+    parse_dates: list[str] | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """Shared loader for the diagnostic benchmark datasets (issue #25).
+
+    Each dataset is a single CSV (``<name>.csv``) plus a metadata JSON
+    (``<name>_metadata.json``). Both are produced by
+    ``benchmark_data/generate_diagnostic_benchmarks.py``.
+    """
+    data_path = BENCHMARK_DIR / f"{name}.csv"
+    metadata_path = BENCHMARK_DIR / f"{name}_metadata.json"
+    missing = [str(p) for p in (data_path, metadata_path) if not p.exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"{name} benchmark artifacts are missing: {missing}. "
+            "Run benchmark_data/generate_diagnostic_benchmarks.py."
+        )
+    data = pd.read_csv(data_path, parse_dates=parse_dates or ["week"])
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    return data, metadata

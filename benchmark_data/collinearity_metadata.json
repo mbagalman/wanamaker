@@ -1,0 +1,20 @@
+{
+  "collinear_pair": [
+    "display_a",
+    "display_b"
+  ],
+  "control_columns": [],
+  "dataset": "collinearity",
+  "date_column": "week",
+  "expected_check_warning": "collinearity",
+  "n_weeks": 80,
+  "pair_correlation": 0.997226,
+  "purpose": "Exercises FR-2.2 collinearity. 'display_a' and 'display_b' are designed with absolute correlation > 0.95; the diagnostic must warn about the pair.",
+  "spend_columns": [
+    "paid_search",
+    "linear_tv",
+    "display_a",
+    "display_b"
+  ],
+  "target_column": "revenue"
+}
