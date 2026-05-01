@@ -1,65 +1,81 @@
+"""FR-3.1 recovery benchmark on the synthetic ground-truth dataset.
+
+Acceptance criteria (FR-3.1):
+- Model fit recovers total media contribution within 15 %.
+- Top 3 channels ranked correctly in >= 80 % of simulation runs.
+- 95 % CI coverage between 90–99 % across simulation runs.
+
+Only the first two are exercised here; CI coverage requires multiple
+simulation runs and lives behind a future wrapper. ``@pytest.mark.engine``
+gates the test on a working PyMC backend.
+"""
+
+from __future__ import annotations
+
 import pytest
+
 from wanamaker.benchmarks.loaders import load_synthetic_ground_truth
 
-@pytest.mark.benchmark
-@pytest.mark.engine
-def test_synthetic_recovery():
-    """Verify FR-3.1 recovery criteria on the synthetic ground-truth dataset.
+pytestmark = [pytest.mark.benchmark, pytest.mark.engine]
 
-    Acceptance criteria (FR-3.1):
-    - Model fit recovers total media contribution within 15%
-    - Top 3 channels ranked correctly in >= 80% of simulation runs
-    - 95% CI coverage between 90-99% across simulation runs
+
+@pytest.fixture(scope="module")
+def synthetic_fit():
+    """Fit the model once and reuse it across the recovery checks.
+
+    Skipping is intentionally narrow: only an unavailable engine backend
+    converts to a skip. Real schema or modelling bugs surface as failures
+    rather than being swallowed by a broad ``pytest.skip``.
     """
+    pytest.importorskip("pymc")
+
+    from wanamaker.engine.pymc import PyMCEngine
+    from wanamaker.model.spec import ChannelSpec, ModelSpec
+
     df, gt = load_synthetic_ground_truth()
 
-    try:
-        from wanamaker.engine.pymc import PyMCEngine
-        engine = PyMCEngine()
-    except ImportError:
-        pytest.skip("PyMC engine not available.")
-
-    try:
-        from wanamaker.model.spec import ModelSpec, ChannelSpec
-        channels = [
-            ChannelSpec(name=c, category="paid_search")
-            for c in gt["channels"].keys()
-        ]
-        model_spec = ModelSpec(
-            target_column="target",
-            date_column="date",
-            channels=channels,
-            control_columns=["price", "comp_spend"]
-        )
-
-        # Test full fit using quick mode just to check API surface
-        # For true benchmark, this should be standard mode and run multiple times
-        fit_result = engine.fit(model_spec, df, seed=42, runtime_mode="quick")
-
-        summary = fit_result.summary
-
-        # Extract total contribution
-        expected_total_contribution = sum([c['total_contribution'] for c in gt['channels'].values()])
-
-        # Calculate recovered total media contribution
-        recovered_total = sum([c.mean_contribution for c in summary.channel_contributions])
-
-        # Verify total media contribution is within 15%
-        error = abs(recovered_total - expected_total_contribution) / expected_total_contribution
-        assert error <= 0.15, f"Total media contribution error is {error:.2%}, expected <= 15%"
-
-        # Verify top 3 channels are ranked correctly
-        expected_channels_ranked = sorted(gt['channels'].items(), key=lambda x: x[1]['total_contribution'], reverse=True)
-        expected_top_3 = [x[0] for x in expected_channels_ranked[:3]]
-
-        recovered_channels_ranked = sorted(summary.channel_contributions, key=lambda x: x.mean_contribution, reverse=True)
-        recovered_top_3 = [x.channel for x in recovered_channels_ranked[:3]]
-
-        assert len(set(expected_top_3).intersection(set(recovered_top_3))) >= 2, "Top 3 channels not ranked correctly"
-
-        # CI coverage check left for future full simulation wrapper
+    channels = [
+        ChannelSpec(name=ch["name"], category=ch["category"])
+        for ch in gt["channels"]
+    ]
+    model_spec = ModelSpec(
+        channels=channels,
+        target_column=gt["target_column"],
+        date_column=gt["date_column"],
+        control_columns=list(gt["control_columns"]),
+    )
+    engine = PyMCEngine()
+    fit_result = engine.fit(model_spec, df, seed=42, runtime_mode="quick")
+    return fit_result, gt
 
 
+def test_total_media_contribution_recovered_within_15pct(synthetic_fit) -> None:
+    fit_result, gt = synthetic_fit
+    expected = float(gt["total_media_contribution"])
+    recovered = sum(c.mean_contribution for c in fit_result.summary.channel_contributions)
 
-    except (NotImplementedError, ImportError, ValueError) as e:
-        pytest.skip(f"Engine backend not fully available: {e}")
+    error = abs(recovered - expected) / expected
+    assert error <= 0.15, (
+        f"Total media contribution recovered {recovered:,.0f} "
+        f"vs expected {expected:,.0f} — error {error:.2%} exceeds the "
+        "FR-3.1 15 % target."
+    )
+
+
+def test_top_3_channels_ranked_at_least_two_correct(synthetic_fit) -> None:
+    fit_result, gt = synthetic_fit
+    expected_top_3 = list(gt["top_3_channels"])
+
+    recovered_ranked = sorted(
+        fit_result.summary.channel_contributions,
+        key=lambda c: c.mean_contribution,
+        reverse=True,
+    )
+    recovered_top_3 = [c.channel for c in recovered_ranked[:3]]
+
+    overlap = set(expected_top_3) & set(recovered_top_3)
+    assert len(overlap) >= 2, (
+        f"Top 3 channels by recovered contribution were {recovered_top_3}, "
+        f"expected something close to {expected_top_3}; overlap was "
+        f"{overlap or 'empty'}."
+    )
