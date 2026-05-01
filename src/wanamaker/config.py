@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RuntimeMode = Literal["quick", "standard", "full"]
 AnchorStrength = Literal["none", "light", "medium", "heavy"]
@@ -64,6 +64,23 @@ class RunConfig(BaseModel):
     artifact_dir: Path = Path(".wanamaker")
 
 
+class LiftTestCalibrationConfig(BaseModel):
+    """Configuration for lift-test / experiment calibration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: Path
+    mode: Literal["roi_prior"] = "roi_prior"
+
+
+class CalibrationConfig(BaseModel):
+    """Evidence and priors to calibrate the model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lift_tests: LiftTestCalibrationConfig | None = None
+
+
 class WanamakerConfig(BaseModel):
     """The full validated configuration for a Wanamaker run."""
 
@@ -73,6 +90,22 @@ class WanamakerConfig(BaseModel):
     channels: list[ChannelConfig] = Field(default_factory=list)
     refresh: RefreshConfig = Field(default_factory=RefreshConfig)
     run: RunConfig = Field(default_factory=RunConfig)
+    calibration: CalibrationConfig | None = None
+
+    @model_validator(mode="after")
+    def _check_lift_test_conflict(self) -> WanamakerConfig:
+        has_legacy = self.data.lift_test_csv is not None
+        has_new = (
+            self.calibration is not None
+            and self.calibration.lift_tests is not None
+            and self.calibration.lift_tests.path is not None
+        )
+        if has_legacy and has_new:
+            raise ValueError(
+                "Cannot specify both data.lift_test_csv and calibration.lift_tests.path. "
+                "Use calibration.lift_tests.path."
+            )
+        return self
 
 
 def load_config(path: Path) -> WanamakerConfig:

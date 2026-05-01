@@ -190,6 +190,7 @@ Unknown fields are rejected.
 | `channels` | list of `ChannelConfig` | `[]` | Per-channel category and adstock settings. |
 | `refresh` | `RefreshConfig` | `{anchor_strength: medium}` | Refresh accountability settings. |
 | `run` | `RunConfig` | `{seed: 0, runtime_mode: standard, artifact_dir: .wanamaker}` | Reproducibility and artifact settings. |
+| `calibration` | `CalibrationConfig` | `null` | External evidence and priors. |
 
 ### `data`
 
@@ -200,12 +201,19 @@ Unknown fields are rejected.
 | `target_column` | string | required | Target metric column, such as revenue or conversions. |
 | `spend_columns` | list of strings | `[]` | Paid media spend columns. |
 | `control_columns` | list of strings | `[]` | Non-media controls such as price, promotions, holidays, or macro indicators. |
-| `lift_test_csv` | path or null | `null` | Optional lift-test calibration CSV. |
+| `lift_test_csv` | path or null | `null` | **Deprecated.** Optional lift-test calibration CSV. Use `calibration.lift_tests.path` instead. |
 
-For `lift_test_csv`, Wanamaker supports three CSV schemas (all require `channel`, `test_start`, and `test_end` columns):
+For `calibration.lift_tests.path` (or legacy `lift_test_csv`), Wanamaker supports three CSV schemas (all require `channel`, `test_start`, and `test_end` columns):
 - **ROI Schema (Canonical):** Explicit ROI fields using `roi_estimate`, `roi_ci_lower`, and `roi_ci_upper`.
 - **Outcome Schema:** `incremental_outcome`, `incremental_spend`, `ci_lower_outcome`, and `ci_upper_outcome`. Wanamaker calculates ROI internally as outcome / spend.
 - **Legacy Schema:** Legacy lift fields `lift_estimate`, `ci_lower`, and `ci_upper`. Supported with a deprecation warning.
+
+### `calibration`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `lift_tests.path` | path | required if `lift_tests` set | CSV containing experiment/lift-test evidence. |
+| `lift_tests.mode` | `roi_prior` | `roi_prior` | How to use the lift test data (currently only `roi_prior` is supported). |
 
 ### `channels`
 

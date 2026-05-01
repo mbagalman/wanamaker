@@ -89,11 +89,17 @@ def build_model_spec(cfg: WanamakerConfig) -> ModelSpec:
 
 
 def _load_lift_test_priors(cfg: WanamakerConfig) -> dict[str, LiftPrior]:
-    if cfg.data.lift_test_csv is None:
+    path = None
+    if cfg.calibration is not None and cfg.calibration.lift_tests is not None:
+        path = cfg.calibration.lift_tests.path
+    elif cfg.data.lift_test_csv is not None:
+        path = cfg.data.lift_test_csv
+
+    if path is None:
         return {}
 
     channel_names = {channel.name for channel in cfg.channels}
-    lift_tests = load_lift_test_csv(cfg.data.lift_test_csv)
+    lift_tests = load_lift_test_csv(path)
     unknown = sorted(set(lift_tests["channel"]) - channel_names)
     if unknown:
         raise ValueError(

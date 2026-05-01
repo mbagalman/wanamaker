@@ -103,8 +103,8 @@ weight on the experiment.
 ## Step 3 — Refit with calibration
 
 Write a calibrated config that points at the lift-test CSV. Use the
-same fields as the uncalibrated config plus a `lift_test_csv` entry
-under `data:`:
+same fields as the uncalibrated config plus a `calibration.lift_tests`
+section:
 
 ```bash
 cat > tutorial_data/config_calibrated.yaml <<'EOF'
@@ -112,7 +112,6 @@ data:
   csv_path: tutorial_data/data.csv
   date_column: week
   target_column: revenue
-  lift_test_csv: tutorial_data/lift_tests.csv
   spend_columns:
     - paid_search
     - paid_social
@@ -145,6 +144,10 @@ channels:
     category: affiliate
   - name: email
     category: email_crm
+
+calibration:
+  lift_tests:
+    path: tutorial_data/lift_tests.csv
 
 run:
   seed: 20260430

@@ -2163,7 +2163,10 @@ def _load_lift_priors_if_any(cfg: Any) -> Any:
     """
     from wanamaker.model.builder import build_model_spec
 
-    if cfg.data.lift_test_csv is None:
+    calibration = getattr(cfg, "calibration", None)
+    lift_tests = getattr(calibration, "lift_tests", None)
+    legacy_path = getattr(cfg.data, "lift_test_csv", None)
+    if lift_tests is None and legacy_path is None:
         return None
     spec = build_model_spec(cfg)
     return spec.lift_test_priors or None
