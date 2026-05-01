@@ -11,6 +11,22 @@ theme:
     - navigation.indexes
     - content.code.copy
 
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            filters:
+              - "!^_"
+            heading_level: 3
+            members_order: source
+            show_if_no_docstring: false
+            show_root_full_path: false
+            show_root_heading: true
+            show_source: false
+
 nav:
   - Home: index.md
   - Installation: installation.md
