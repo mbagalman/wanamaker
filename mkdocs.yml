@@ -24,6 +24,7 @@ nav:
       - Technical Architecture: architecture.md
       - BRD/PRD: wanamaker_brd_prd.md
       - Feedback: feedback.md
+      - Risk-Adjusted Allocation Ramps: risk_adjusted_allocation.md
   - Decisions:
       - Bayesian Engine Selection: decisions/0001-bayesian-engine-selection.md
   - References:
