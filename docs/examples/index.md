@@ -35,7 +35,7 @@ experiment back as a calibration prior and seeing how the
 recommendations change. Includes a side-by-side ramp comparison between
 the uncalibrated and calibrated runs.
 
-**Commands covered:** `wanamaker fit` (twice), `showcase`,
+**Commands covered:** `wanamaker fit` (twice), `wanamaker showcase`,
 `recommend-ramp`.
 
 ## Suggested order

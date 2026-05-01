@@ -85,9 +85,11 @@ Pretend you are at the end of Q3 with 130 weeks of history:
 head -n 131 benchmark_data/public_example.csv > tutorial_data/data.csv
 wc -l tutorial_data/data.csv  # 131 = 1 header + 130 weeks
 wanamaker fit --config tutorial_data/config.yaml
+RUN_INITIAL=$(ls -t .wanamaker/runs | head -1)
+wanamaker showcase --run-id "$RUN_INITIAL"
 ```
 
-Note the run ID — call it `RUN_INITIAL`. Open
+Open
 `.wanamaker/runs/$RUN_INITIAL/showcase.html` and skim the channel ROI
 table. This is the picture the CMO has from the previous refresh.
 
@@ -99,6 +101,7 @@ Now extend the data with the remaining 26 weeks (Q4 + early Q1):
 cp benchmark_data/public_example.csv tutorial_data/data.csv
 wc -l tutorial_data/data.csv  # 157 = 1 header + 156 weeks
 wanamaker refresh --config tutorial_data/config.yaml
+RUN_REFRESH=$(ls -t .wanamaker/runs | head -1)
 ```
 
 This is the key command. It does three things at once:
@@ -110,7 +113,7 @@ This is the key command. It does three things at once:
 3. **Writes a refresh diff** comparing the old and new posteriors,
    classifying every parameter movement.
 
-Note the new run ID — call it `RUN_REFRESH`.
+The new run ID is now stored in `RUN_REFRESH`.
 
 ## Step 3 — Read the refresh diff
 
