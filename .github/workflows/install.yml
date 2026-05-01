@@ -1,0 +1,60 @@
+name: Cross-platform install
+
+# Verifies that ``pip install wanamaker`` succeeds in a clean Python
+# environment on every supported platform/arch combination. FR-6.1 / NFR-6
+# require no R, no GPU drivers, no manual jaxlib downloads — anything that
+# breaks the headline one-command install on any of these runners is a
+# release blocker.
+#
+# Triggers:
+#   - push to master (so a regression is caught immediately after merge)
+#   - release tags ``v*`` (so v1.0 cannot ship with a broken install matrix)
+#   - manual dispatch (for ad-hoc verification before cutting a release)
+#
+# Pull requests are intentionally excluded: the unit-test job already runs
+# the matrix on every PR; the install-only job is much slower per platform
+# and would just duplicate that signal.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  install:
+    name: Install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 is the last Intel runner image; macos-latest currently
+        # resolves to an Apple Silicon image. Keeping both ensures wheels
+        # exist for both arches before a release.
+        os: [ubuntu-latest, macos-13, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install wanamaker (no editable, no extras)
+        # Plain `pip install .` matches what an end user would run.
+        # No -e and no [dev] so the test exercises the published wheel /
+        # sdist build path, not a development checkout.
+        run: pip install .
+
+      - name: Verify package imports cleanly
+        run: python -c "import wanamaker; print(wanamaker.__version__)"
+
+      - name: Verify wanamaker CLI is on PATH
+        run: wanamaker --help
+
+      - name: Verify diagnose subcommand is wired
+        run: wanamaker diagnose --help
