@@ -1,0 +1,45 @@
+{# Risk-adjusted allocation ramp template (FR-5.6).
+
+   Voice: dry, direct, deterministic. This report explains how far the
+   model supports moving from a baseline plan toward a target plan.
+#}
+# Risk-adjusted ramp recommendation
+
+- Run ID: `{{ run_id }}`
+- Baseline plan: `{{ baseline_path }}`
+- Target plan: `{{ target_path }}`
+- Verdict: **{{ status_label }}** (`{{ status }}`)
+- Recommended ramp: **{{ recommended_fraction_label }}**
+
+## Recommendation
+
+{{ explanation }}
+{% if advisor_handoff %}
+
+{{ advisor_handoff }}
+{% endif %}
+{% if blocking_reason %}
+
+Blocking reason: `{{ blocking_reason }}`
+{% endif %}
+
+## Candidate Gates
+
+{% if candidates %}
+| Ramp | Gate status | Expected increment | P(improvement) | P(material loss) | q05 increment | CVaR 5 | Largest move share | Kelly cap | Failed gates | Extrapolation flags |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
+{% for c in candidates %}
+| {{ c.fraction_label }} | {% if c.passes %}pass{% else %}fail{% endif %} | {{ "{:,.0f}".format(c.expected_increment) }} | {{ "{:.0%}".format(c.probability_positive) }} | {{ "{:.0%}".format(c.probability_material_loss) }} | {{ "{:,.0f}".format(c.q05_increment) }} | {{ "{:,.0f}".format(c.cvar_5) }} | {{ "{:.0%}".format(c.largest_move_share) }} | {{ "{:.0%}".format(c.fractional_kelly) }} | {{ c.failed_gates_label }} | {{ c.extrapolation_count }} |
+{% endfor %}
+{% else %}
+No positive ramp candidates were evaluated. The recommendation was blocked before
+candidate scoring.
+{% endif %}
+
+## How To Use This
+
+This is not an automatic budget optimizer. It evaluates how much of the
+user-supplied target plan is analytically supported right now. If the verdict is
+`stage`, adopt the recommended fraction and refresh after new data arrives. If
+the verdict is `test_first`, the next useful action is better evidence, not a
+larger immediate move.

@@ -71,6 +71,11 @@ def render_trust_card(context: dict[str, Any]) -> str:
     return _render("trust_card.md.j2", context)
 
 
+def render_ramp_recommendation(context: dict[str, Any]) -> str:
+    """Render a risk-adjusted allocation ramp recommendation (FR-5.6)."""
+    return _render("ramp_recommendation.md.j2", context)
+
+
 # ---------------------------------------------------------------------------
 # Context shaping
 # ---------------------------------------------------------------------------
@@ -185,6 +190,71 @@ def build_trust_card_context(
         ],
         "saturation_channels": saturation_channels,
         "has_invariant_channels": has_invariant,
+    }
+
+
+def build_ramp_recommendation_context(
+    recommendation: Any,
+    *,
+    run_id: str,
+    baseline_path: Any,
+    target_path: Any,
+    advisor_handoff: str | None = None,
+) -> dict[str, Any]:
+    """Shape the inputs the ramp-recommendation template expects.
+
+    Args:
+        recommendation: ``RampRecommendation`` returned by
+            ``wanamaker.forecast.ramp.recommend_ramp``.
+        run_id: Run ID used to reconstruct the posterior.
+        baseline_path: User-supplied baseline plan path.
+        target_path: User-supplied target plan path.
+        advisor_handoff: Optional Experiment Advisor sentence for
+            evidence-bound recommendations.
+
+    Returns:
+        Plain dict ready to feed into ``render_ramp_recommendation``.
+    """
+    status_labels = {
+        "proceed": "Proceed",
+        "stage": "Stage",
+        "test_first": "Test first",
+        "do_not_recommend": "Do not recommend",
+    }
+    candidates = []
+    for candidate in recommendation.candidates:
+        candidates.append({
+            "fraction": float(candidate.fraction),
+            "fraction_label": f"{candidate.fraction:.0%}",
+            "expected_increment": float(candidate.expected_increment),
+            "probability_positive": float(candidate.probability_positive),
+            "probability_material_loss": float(candidate.probability_material_loss),
+            "q05_increment": float(candidate.q05_increment),
+            "cvar_5": float(candidate.cvar_5),
+            "largest_move_share": float(candidate.largest_move_share),
+            "fractional_kelly": float(candidate.fractional_kelly),
+            "passes": bool(candidate.passes),
+            "failed_gates": list(candidate.failed_gates),
+            "failed_gates_label": (
+                ", ".join(candidate.failed_gates) if candidate.failed_gates else "none"
+            ),
+            "extrapolation_count": len(candidate.extrapolation_flags),
+        })
+
+    return {
+        "run_id": run_id,
+        "baseline_path": str(baseline_path),
+        "target_path": str(target_path),
+        "baseline_plan_name": recommendation.baseline_plan_name,
+        "target_plan_name": recommendation.target_plan_name,
+        "recommended_fraction": float(recommendation.recommended_fraction),
+        "recommended_fraction_label": f"{recommendation.recommended_fraction:.0%}",
+        "status": recommendation.status,
+        "status_label": status_labels.get(recommendation.status, recommendation.status),
+        "explanation": recommendation.explanation,
+        "blocking_reason": recommendation.blocking_reason,
+        "candidates": candidates,
+        "advisor_handoff": advisor_handoff,
     }
 
 
