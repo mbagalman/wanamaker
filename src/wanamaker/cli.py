@@ -35,6 +35,31 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    """Print ``wanamaker <version>`` and exit when ``--version`` is set.
+
+    Eager so it short-circuits before the rest of the CLI runs.
+    """
+    if value:
+        from wanamaker import __version__
+
+        typer.echo(f"wanamaker {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed wanamaker version and exit.",
+    ),
+) -> None:
+    """Top-level options shared by every ``wanamaker`` subcommand."""
+
+
 @app.command()
 def diagnose(
     data: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
