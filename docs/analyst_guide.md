@@ -210,6 +210,43 @@ The point is not to freeze history. New data should be allowed to update the
 model. The point is to prevent historical estimates from silently changing with
 no explanation.
 
+## Risk-Adjusted Ramps
+
+Scenario comparison answers "which plan looks better." It does not answer
+"how much of the way toward Plan B should we move now." A model that says
+Plan B beats Plan A in expectation is not the same as a model that supports
+shifting the full budget today.
+
+`wanamaker recommend-ramp` evaluates a ladder of partial moves
+(`x(f) = x0 + f * (x_star - x0)` at `f` in `{10%, 25%, 50%, 75%, 100%}`)
+and recommends the largest fraction the model can defend right now. The
+verdict is one of four discrete categories:
+
+| Status | Read it as |
+|---|---|
+| `proceed` | The model supports the recommended fraction. Higher fractions either fail because the model genuinely doesn't believe in larger moves, or you're already at 100%. Act with normal caution. |
+| `stage` | The recommended fraction passes, but higher fractions fail on **evidence-quality** grounds — extrapolation, weak Trust Card, or Kelly sizing. Adopt the recommended fraction and refresh after new data; the cap may lift on the next run. |
+| `test_first` | No positive fraction passes, **and** the binding failures are evidence-quality. The next useful action is a controlled experiment or a refresh, not a smaller move. |
+| `do_not_recommend` | No positive fraction passes, and the failures are about expected value or downside risk. The model does not currently support this reallocation in any form. |
+
+A few practical notes:
+
+- The verdict is gated on probability of improvement, probability of
+  material loss, lower-tail (CVaR) risk, extrapolation severity, the Trust
+  Card, a fractional-Kelly sizing cap, and an up-front block on
+  reallocations involving spend-invariant channels (FR-3.2). The math lives
+  in [`docs/risk_adjusted_allocation.md`](risk_adjusted_allocation.md).
+- v1 caps the Kelly multiplier at 0.5 even with a clean Trust Card, so
+  `proceed` at `f = 100%` is uncommon and `stage` at `f = 50%` is the
+  normal "everything looks good" outcome. That is intentional: the v1
+  position is "the model can advise on direction, but the user owns the
+  decision to commit the full budget."
+- `largest_move_share` (the share of moved budget concentrated in one
+  channel) is reported on each candidate but is **not** gated in v1. Read
+  it alongside the Trust Card; a high concentration on a channel with weak
+  identifiability deserves caution that the per-candidate score won't
+  capture by itself.
+
 ## Common Pitfalls
 
 ### Too Little History
@@ -256,6 +293,9 @@ Use these defaults unless there is a strong reason not to:
 - Prefer scenario comparison over automatic optimization.
 - If a recommended plan is far from historical behavior, stage the move and
   refresh after new data arrives.
+- Use `wanamaker recommend-ramp` between scenario comparison and execution:
+  it ranks the partial moves by posterior risk and tells you which fraction
+  the model can defend now versus which need an experiment first.
 - Use experiments when a high-value decision depends on a wide interval.
 
 ## What To Bring To A Review Meeting
@@ -266,6 +306,7 @@ For a stakeholder meeting, bring:
 - the Trust Card
 - top channel contributions and ROI intervals
 - any scenario comparison output
+- any ramp recommendation for the plan you intend to act on
 - any refresh diff if this is not the first run
 - a short list of decisions the model supports now
 - a short list of decisions that need more evidence

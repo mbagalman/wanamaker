@@ -221,6 +221,56 @@ user-induced, weakly identified, or unexplained.
 Use refresh to avoid silently rewriting history. A changed estimate is not
 automatically bad, but it should be visible and explainable.
 
+## Step 7 (optional): Ask How Far To Move
+
+Scenario comparison ranks the plans you supplied. It does not tell you how
+much of the way toward the preferred plan to adopt today. The
+`recommend-ramp` command answers that question.
+
+You will need a baseline plan and a target plan. Both must use the same
+columns as the training data. For this tutorial, write two simple
+two-period plans next to the example YAML:
+
+```bash
+cat > base.csv <<EOF
+period,paid_search,paid_social,linear_tv,ctv,online_video,display,affiliate,email
+2024-08-05,18000,15000,28000,15000,12000,8000,5500,2600
+2024-08-12,18000,15000,28000,15000,12000,8000,5500,2600
+EOF
+
+cat > alt.csv <<EOF
+period,paid_search,paid_social,linear_tv,ctv,online_video,display,affiliate,email
+2024-08-05,21000,16000,30000,15000,12000,8500,6000,2800
+2024-08-12,21000,16000,30000,15000,12000,8500,6000,2800
+EOF
+```
+
+`base.csv` continues the previous spend mix; `alt.csv` shifts a few
+thousand dollars per week toward search and social. With a fitted run ID
+in hand, ask Wanamaker how far to move:
+
+```bash
+wanamaker recommend-ramp --run-id <run_id> --baseline base.csv --target alt.csv
+```
+
+The output is a discrete verdict — one of `proceed`, `stage`,
+`test_first`, or `do_not_recommend` — plus a per-candidate gate table and
+a Markdown report saved to:
+
+```text
+.wanamaker/runs/<run_id>/ramp_base_to_alt.md
+```
+
+Read the verdict alongside the candidate table. The verdict tells you
+which fraction of the move the model can defend now; the table shows
+*why* higher fractions failed (extrapolation, weak Trust Card, expected
+value, downside risk). v1 caps the Kelly multiplier at 0.5 even on a
+clean run, so a `stage` verdict at 50% is the typical "everything looks
+good" outcome and `proceed` at 100% is uncommon — that is intentional.
+
+For the design rationale and the four-status interpretation guide, see
+[Risk-Adjusted Allocation Ramps](risk_adjusted_allocation.md).
+
 ## Troubleshooting
 
 ### The diagnostic says the data is not recommended
@@ -253,5 +303,6 @@ Trust Card flags a risk. Cautious language is a feature, not a failure.
 
 - [Analyst's Guide](analyst_guide.md)
 - [What Wanamaker Tells Your CMO](cmo_guide.md)
+- [Risk-Adjusted Allocation Ramps](risk_adjusted_allocation.md)
 - [Privacy and Data Handling](privacy.md)
 - [Technical Architecture](architecture.md)

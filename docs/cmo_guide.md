@@ -184,6 +184,46 @@ How to act on it:
 This conservative framing is intentional. A model should not make a large budget
 change look safer than it is.
 
+## Risk-Adjusted Ramps
+
+Once a preferred plan is identified, the next question is rarely "do we
+adopt all of it." It is usually:
+
+> How much of the way toward the new plan is supported by the evidence we
+> have today, and what does the model want us to do with the rest?
+
+Wanamaker answers this with a discrete ramp recommendation. You supply
+the current plan and the candidate plan; the tool evaluates partial moves
+(10%, 25%, 50%, 75%, 100%) against probability of improvement, downside
+probability of material loss, lower-tail risk, extrapolation severity,
+and the Trust Card. The output is one of four plain-English categories:
+
+| Verdict | What it means for the decision |
+|---|---|
+| **Proceed** | The model supports moving the recommended fraction. The chosen ramp is the largest the evidence justifies right now; higher fractions failed because the model genuinely doesn't believe in them or because we are at 100%. |
+| **Stage** | Adopt the recommended fraction, refresh after new data, and revisit. Higher fractions failed on evidence-quality grounds (extrapolation beyond historical spend, or a Trust Card weakness). The cap may lift on the next run. |
+| **Test first** | The model cannot defend any positive ramp on the current evidence, but the failures point at uncertainty rather than expected value. Run a controlled test or wait for a refresh; don't commit budget yet. |
+| **Do not recommend** | The model does not support this reallocation in any size. The expected value or downside risk is the binding constraint, and more time alone won't fix it. |
+
+How to use this in practice:
+
+- A `proceed` or `stage` verdict gives the executive a number to commit
+  to *now* and a clear story for the rest of the move.
+- A `test first` verdict is a productive answer, not a refusal — it tells
+  you which channel to test and how the result would change the
+  recommendation.
+- A `do not recommend` verdict is the one place where the tool says
+  "no" outright, and it should be read alongside the underlying
+  scenario-comparison output: if a candidate plan looks better in
+  expectation but the ramp output blocks it, the downside profile is
+  the reason.
+
+The full design rationale and the math live in
+[`docs/risk_adjusted_allocation.md`](risk_adjusted_allocation.md). For
+v1 the ramp will rarely recommend a full 100% move even on a clean run —
+that is intentional. The product's position is "the model can advise on
+direction; the user owns the decision to commit the full budget."
+
 ## Refresh Accountability
 
 Refresh accountability answers:
@@ -289,6 +329,8 @@ Before approving a budget change based on Wanamaker, ask:
 
 - What decision are we making?
 - Which scenario or forecast supports it?
+- What does the ramp recommendation say — proceed, stage, test first, or
+  do not recommend? Which gates were binding?
 - What does the Trust Card mark as weak or moderate?
 - Are we staying inside historical spend ranges?
 - If not, how are we staging or testing the move?
