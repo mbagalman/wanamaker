@@ -332,9 +332,84 @@ def fit(
 @app.command()
 def report(
     run_id: str = typer.Option(..., "--run-id"),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Path to save the report. Default: <run_dir>/report.md",
+    ),
 ) -> None:
-    """Render the executive summary and trust card for a completed run (FR-5)."""
-    raise NotImplementedError("Phase 2: wire up report command")
+    """Render the executive summary and Trust Card for a completed run (FR-5)."""
+    from wanamaker.artifacts import deserialize_refresh_diff, deserialize_summary, run_paths
+    from wanamaker.config import load_config
+    from wanamaker.reports import (
+        build_executive_summary_context,
+        build_trust_card_context,
+        render_executive_summary,
+        render_trust_card,
+    )
+    from wanamaker.trust_card.compute import build_trust_card
+
+    paths = run_paths(artifact_dir, run_id)
+    if not paths.config.exists():
+        typer.echo(
+            typer.style(
+                f"Error: run {run_id!r} not found in {artifact_dir / 'runs'}. "
+                "Run 'wanamaker fit' first or check --artifact-dir.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not paths.summary.exists():
+        typer.echo(
+            typer.style(
+                f"Error: summary.json missing for run {run_id!r} at {paths.summary}.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    summary = deserialize_summary(paths.summary.read_text())
+
+    refresh_diff = None
+    if paths.refresh_diff.exists():
+        refresh_diff = deserialize_refresh_diff(paths.refresh_diff.read_text())
+
+    cfg = load_config(paths.config)
+    lift_test_priors = _load_lift_priors_if_any(cfg)
+
+    trust_card = build_trust_card(
+        summary,
+        refresh_diff=refresh_diff,
+        lift_test_priors=lift_test_priors,
+    )
+
+    # Anchor in the same Markdown file rather than a separate trust_card.md;
+    # report.md is meant to be self-contained per the issue acceptance.
+    exec_context = build_executive_summary_context(
+        summary,
+        trust_card,
+        refresh_diff=refresh_diff,
+        advisor_recommendations=_safe_advisor_recommendations(summary),
+        trust_card_link="#model-trust-card",
+    )
+    trust_context = build_trust_card_context(summary, trust_card)
+
+    body = (
+        render_executive_summary(exec_context)
+        + "\n---\n\n"
+        + render_trust_card(trust_context)
+    )
+
+    output_path = output if output is not None else paths.root / "report.md"
+    output_path.write_text(body, encoding="utf-8")
+    typer.echo(typer.style(f"Report saved: {output_path}", fg=typer.colors.GREEN))
 
 
 @app.command()
@@ -1257,6 +1332,42 @@ def _format_scenario_comparison_markdown(results: list[Any], run_id: str) -> str
                     )
         lines.append("")
     return "\n".join(lines) + "\n"
+
+
+def _load_lift_priors_if_any(cfg: Any) -> Any:
+    """Return lift-test priors keyed by channel if the config supplies them.
+
+    Used by the report command so the Trust Card's lift-test-consistency
+    dimension can be evaluated when calibration data is part of the run.
+    Returns ``None`` when no lift-test CSV is configured, which omits the
+    dimension cleanly.
+    """
+    from wanamaker.model.builder import build_model_spec
+
+    if cfg.data.lift_test_csv is None:
+        return None
+    spec = build_model_spec(cfg)
+    return spec.lift_test_priors or None
+
+
+def _safe_advisor_recommendations(summary: Any) -> list[str]:
+    """Best-effort Experiment Advisor bullets, with a clean fallback.
+
+    The advisor (#29) is not yet implemented. The exec-summary template
+    falls back to its own "consider an experiment for weak channels"
+    text when this returns an empty list, so the report stays useful in
+    the meantime.
+    """
+    from wanamaker.advisor.channel_flagging import flag_channels
+
+    try:
+        flags = flag_channels(summary, None)  # type: ignore[arg-type]
+    except NotImplementedError:
+        return []
+    return [
+        f"Consider an experiment for `{flag.channel}`: {flag.rationale}"
+        for flag in flags
+    ]
 
 
 if __name__ == "__main__":  # pragma: no cover

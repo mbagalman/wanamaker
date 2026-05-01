@@ -1,18 +1,146 @@
 {# Plain-English executive summary template (FR-5.3).
 
-   This is a placeholder skeleton. The real template lands in Phase 2 once
-   the posterior summary structures are concrete. The voice, per AGENTS.md
-   §"a note on the project's voice": dry, direct, honest about uncertainty,
-   no AI sparkle phrases.
+   Voice (per AGENTS.md "a note on the project's voice"):
+     - dry, direct, honest about uncertainty
+     - no AI-sparkle phrases ("powered by", "intelligent", etc.)
+     - when the model can't tell the user something, say so plainly
 
-   Required context keys (to be finalized):
-     - period_start, period_end
-     - total_spend, total_target
-     - channels: [{name, contribution, ci, confidence}]
-     - trust_card: TrustCard
+   Required context keys (built by build_executive_summary_context):
+     - period_start, period_end, n_periods
+     - total_media_contribution
+     - channels: list of channel views with confidence pre-tagged
+     - trust_card_link
+     - has_weak_trust, weak_dimensions, moderate_dimensions
+     - advisor_recommendations
+     - refresh_narrative (optional)
 #}
 # Executive summary
 
-_Period: {{ period_start }} – {{ period_end }}_
+_Period: {{ period_start }} – {{ period_end }} ({{ n_periods }} periods)._
 
-This is a placeholder. The real summary template lands in Phase 2.
+## Headline finding
+
+{% if channels %}
+{%- set top_channel = channels[0] %}
+Across this period, paid media contributed an estimated
+**{{ "{:,.0f}".format(total_media_contribution) }}** to the target.
+{% if top_channel.confidence == "high" %}
+**`{{ top_channel.name }}`** was the largest contributor at
+**{{ "{:,.0f}".format(top_channel.contribution_mean) }}**
+({{ "{:.0%}".format(top_channel.share_of_effect) }} of media impact),
+with a 95% credible interval of
+{{ "{:,.0f}".format(top_channel.contribution_hdi_low) }}–{{ "{:,.0f}".format(top_channel.contribution_hdi_high) }}.
+{% elif top_channel.confidence == "moderate" %}
+The model's best point estimate is that **`{{ top_channel.name }}`** was the
+largest contributor at {{ "{:,.0f}".format(top_channel.contribution_mean) }}
+({{ "{:.0%}".format(top_channel.share_of_effect) }} of media impact),
+with a wide 95% credible interval of
+{{ "{:,.0f}".format(top_channel.contribution_hdi_low) }}–{{ "{:,.0f}".format(top_channel.contribution_hdi_high) }}.
+The ranking is plausible but not tight.
+{% else %}
+The largest point estimate is **`{{ top_channel.name }}`** at
+{{ "{:,.0f}".format(top_channel.contribution_mean) }}, but the data does not
+strongly support that ranking — its 95% credible interval is
+{{ "{:,.0f}".format(top_channel.contribution_hdi_low) }}–{{ "{:,.0f}".format(top_channel.contribution_hdi_high) }}.
+Treat the ordering as suggestive, not decided.
+{% endif %}
+{% else %}
+No channel contributions were available for this run.
+{% endif %}
+{% if has_weak_trust %}
+
+> The Trust Card flags weakness on:
+> {% for d in weak_dimensions %}**{{ d.name }}**{% if not loop.last %}, {% endif %}{% endfor %}.
+> Treat the conclusions below with that in mind.
+{% endif %}
+
+## Channel contributions
+
+{% if channels %}
+| Channel | Contribution | 95% credible interval | Share of media | Confidence |
+|---|---|---|---|---|
+{% for channel in channels %}
+| `{{ channel.name }}` | {{ "{:,.0f}".format(channel.contribution_mean) }} | {{ "{:,.0f}".format(channel.contribution_hdi_low) }}–{{ "{:,.0f}".format(channel.contribution_hdi_high) }} | {{ "{:.0%}".format(channel.share_of_effect) }} | {{ channel.confidence }} |
+{% endfor %}
+
+{% set invariant_channels = channels | selectattr("spend_invariant") | list %}
+{% if invariant_channels %}
+Saturation cannot be estimated from observed data for:
+{% for channel in invariant_channels %}
+- `{{ channel.name }}` — spend was effectively constant over the period;
+  the curve shape comes from prior knowledge only.
+{% endfor %}
+
+These channels are excluded from reallocation guidance (FR-3.2).
+{% endif %}
+{% else %}
+No channel contributions were estimated for this run.
+{% endif %}
+
+## ROI summary
+
+{% if channels %}
+| Channel | ROI (mean) | 95% credible interval | Confidence |
+|---|---|---|---|
+{% for channel in channels %}
+{% if channel.spend_invariant %}
+| `{{ channel.name }}` | n/a | n/a | weak (spend invariant) |
+{% else %}
+| `{{ channel.name }}` | {{ "{:.2f}".format(channel.roi_mean) }} | {{ "{:.2f}".format(channel.roi_hdi_low) }}–{{ "{:.2f}".format(channel.roi_hdi_high) }} | {{ channel.confidence }} |
+{% endif %}
+{% endfor %}
+{% else %}
+ROI estimates were not available for this run.
+{% endif %}
+
+## Key uncertainties
+
+{% if weak_dimensions or moderate_dimensions %}
+{% for d in weak_dimensions %}
+- **{{ d.name }} (weak):** {{ d.explanation }}
+{% endfor %}
+{% for d in moderate_dimensions %}
+- **{{ d.name }} (moderate):** {{ d.explanation }}
+{% endfor %}
+{% else %}
+No Trust Card dimension flagged a weakness for this run.
+{% endif %}
+
+## Recommended actions
+
+{% set weak_channels = channels | selectattr("confidence", "equalto", "weak") | list %}
+{% if advisor_recommendations or weak_channels %}
+{% for line in advisor_recommendations %}
+- {{ line }}
+{% endfor %}
+{% if weak_channels and not advisor_recommendations %}
+{% for channel in weak_channels %}
+- Consider an experiment for **`{{ channel.name }}`**: ROI is weakly
+  identified from the historical data, so a controlled test is the
+  fastest way to firm up the estimate.
+{% endfor %}
+{% endif %}
+{% else %}
+- No specific actions are recommended; the model's posterior is well
+  identified across channels and the Trust Card is clean.
+{% endif %}
+{% if refresh_narrative %}
+
+## Refresh notes
+
+This run was a refresh of `{{ refresh_narrative.previous_run_id }}`.
+Across {{ refresh_narrative.n_movements }} parameter movement(s),
+{{ refresh_narrative.n_unexplained }} were classified as **unexplained**
+({{ "{:.0%}".format(refresh_narrative.unexplained_fraction) }}).
+{% if refresh_narrative.movements_by_class %}
+Breakdown:
+{% for cls, n in refresh_narrative.movements_by_class.items() %}
+- {{ cls }}: {{ n }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+## Technical details
+
+For sampler diagnostics, holdout accuracy, and per-dimension Trust Card
+status, see [Model Trust Card]({{ trust_card_link }}).

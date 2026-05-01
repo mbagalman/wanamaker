@@ -1,12 +1,59 @@
-{# Trust Card template (FR-5.4). Placeholder skeleton; expanded in Phase 1.
+{# Trust Card template (FR-5.4).
 
-   Required context keys:
-     - dimensions: [{name, status, explanation}]
+   Voice: dry, direct, honest. The card is the place where the model
+   says, in plain English, where it does and does not deserve trust.
+
+   Required context keys (built by build_trust_card_context):
+     - dimensions: list of {name, status, explanation}
+     - saturation_channels: list of {name, spend_invariant,
+                                     observed_spend_min, observed_spend_max}
+     - has_invariant_channels: bool
 #}
 # Model Trust Card
 
+{% if not dimensions %}
+No Trust Card dimensions were computed for this run.
+{% else %}
 | Dimension | Status | Notes |
 |---|---|---|
 {% for d in dimensions %}
-| {{ d.name }} | {{ d.status }} | {{ d.explanation }} |
+| {{ d.name }} | **{{ d.status }}** | {{ d.explanation }} |
 {% endfor %}
+
+## Dimension details
+
+{% for d in dimensions %}
+### {{ d.name }} — {{ d.status }}
+
+{{ d.explanation }}
+{% if d.name == "saturation_identifiability" and saturation_channels %}
+
+Per-channel status:
+
+| Channel | Status | Observed spend range |
+|---|---|---|
+{% for channel in saturation_channels %}
+{% if channel.spend_invariant %}
+| `{{ channel.name }}` | spend invariant | {{ "{:,.0f}".format(channel.observed_spend_min) }}–{{ "{:,.0f}".format(channel.observed_spend_max) }} |
+{% else %}
+| `{{ channel.name }}` | identifiable | {{ "{:,.0f}".format(channel.observed_spend_min) }}–{{ "{:,.0f}".format(channel.observed_spend_max) }} |
+{% endif %}
+{% endfor %}
+{% if has_invariant_channels %}
+
+Saturation cannot be estimated from observed data for the channels marked
+"spend invariant" — their spend was effectively constant over the
+training window. The model uses prior knowledge for those curves only,
+and the Experiment Advisor will not recommend reallocations involving
+them (FR-3.2).
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+## What this card does not cover
+
+The Trust Card surfaces the failure modes Wanamaker can detect from the
+fit itself. It does not attest to data quality before the fit (that is
+the job of `wanamaker diagnose`) or to whether the marketing context
+matches the assumptions the model was built on.

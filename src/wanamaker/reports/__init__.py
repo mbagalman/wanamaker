@@ -11,6 +11,16 @@ an LLM.
 Templates ship inside this subpackage so the package is self-contained.
 """
 
-from wanamaker.reports.render import render_executive_summary, render_trust_card
+from wanamaker.reports.render import (
+    build_executive_summary_context,
+    build_trust_card_context,
+    render_executive_summary,
+    render_trust_card,
+)
 
-__all__ = ["render_executive_summary", "render_trust_card"]
+__all__ = [
+    "build_executive_summary_context",
+    "build_trust_card_context",
+    "render_executive_summary",
+    "render_trust_card",
+]
