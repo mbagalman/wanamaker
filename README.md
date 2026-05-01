@@ -66,6 +66,42 @@ minutes on a modern laptop.
 The same flow runs end-to-end in [a hosted Colab notebook](notebooks/quickstart.ipynb)
 — useful for evaluators who don't want to install PyMC locally first.
 
+## How Wanamaker compares to other MMM tools
+
+Wanamaker is built around the *workflow* gaps the other open-source MMM
+tools leave to the user — readiness checks, credibility audit, refresh
+accountability, decision-grade reports. The math layer is intentionally
+the same proven Bayesian foundation everyone else uses.
+
+|                                              | [Robyn](https://github.com/facebookexperimental/Robyn) | [Meridian](https://github.com/google/meridian) | [PyMC-Marketing](https://github.com/pymc-labs/pymc-marketing) | **Wanamaker** |
+| -------------------------------------------- | :----------------------------------------------------: | :--------------------------------------------: | :-----------------------------------------------------------: | :-----------: |
+| Full posterior distributions                 |                           –                            |                       ✓                        |                               ✓                               |     **✓**     |
+| Pre-fit data readiness diagnostic            |                           –                            |                       –                        |                               –                               |     **✓**     |
+| Post-fit Trust Card (credibility audit)      |                           –                            |                       –                        |                               –                               |     **✓**     |
+| Refresh diff with movement classification    |                           –                            |                       –                        |                               –                               |     **✓**     |
+| Risk-adjusted allocation ramp                |                           –                            |                       –                        |                               –                               |     **✓**     |
+| Plain-English executive summary              |                        partial                         |                       –                        |                               –                               |     **✓**     |
+| Self-contained HTML stakeholder report       |                           –                            |                       –                        |                               –                               |     **✓**     |
+| Lift-test calibration                        |                           ✓                            |                       ✓                        |                               ✓                               |       ✓       |
+| Geo-level hierarchical modeling              |                        partial                         |                       ✓                        |                            possible                           |    – (v1)     |
+| Built-in budget optimizer                    |                       ✓ (mature)                       |                    partial                     |                               –                               |    – (v1)     |
+| CPU-only at typical mid-market scale         |                           ✓                            |                  GPU advised                   |                               ✓                               |       ✓       |
+
+**Where Wanamaker pulls ahead** is the operational layer above the math —
+the work it takes to turn a fitted Bayesian model into a recurring decision
+cadence. **Where Wanamaker lags** is intentional v1 scope: no geo-hierarchy,
+no built-in budget optimizer.
+
+If you have geo-level data, a JAX-comfortable team, or 50+ channels, Meridian
+will fit better. If your team lives in R and budget allocation is the primary
+output, Robyn will fit better. If you want maximum modeling flexibility and
+have senior Bayesian practitioners on staff, PyMC-Marketing will fit better.
+If you can budget $80–120K/year for a managed service,
+[Recast](https://getrecast.com) is the obvious commercial comparison.
+
+Full long-form comparison with honest tradeoffs:
+[`docs/comparison.md`](docs/comparison.md).
+
 ## Reading order
 
 1. [BRD/PRD](docs/wanamaker_brd_prd.md) — strategic and product context
