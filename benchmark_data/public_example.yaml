@@ -1,0 +1,41 @@
+data:
+  csv_path: benchmark_data/public_example.csv
+  date_column: week
+  target_column: revenue
+  spend_columns:
+    - paid_search
+    - paid_social
+    - linear_tv
+    - ctv
+    - online_video
+    - display
+    - affiliate
+    - email
+  control_columns:
+    - price_index
+    - promo_flag
+    - holiday_flag
+    - macro_index
+
+channels:
+  - name: paid_search
+    category: paid_search
+  - name: paid_social
+    category: paid_social
+  - name: linear_tv
+    category: linear_tv
+  - name: ctv
+    category: ctv
+  - name: online_video
+    category: video
+  - name: display
+    category: display_programmatic
+  - name: affiliate
+    category: affiliate
+  - name: email
+    category: email_crm
+
+run:
+  seed: 20260430
+  runtime_mode: quick
+  artifact_dir: .wanamaker
