@@ -434,13 +434,15 @@ def response_curves_svg(channels: Sequence[dict[str, Any]]) -> str:
     Each ``channels`` dict must include:
       - ``name``, ``spend_invariant``, ``observed_spend_min``,
         ``observed_spend_max``, ``mean_contribution``
-      - ``ec50`` (Hill EC50)
+      - ``half_life`` (geometric adstock half-life)
+      - ``ec50`` (Hill EC50, on the adstocked-spend scale)
       - ``slope`` (Hill slope)
       - ``coefficient`` (saturated-spend → contribution scale factor)
 
-    When ``ec50``, ``slope``, or ``coefficient`` is missing or non-finite,
-    the panel falls back to the spend-invariant rendering so the chart
-    still composes for any engine that doesn't expose Hill parameters.
+    When ``half_life``, ``ec50``, ``slope``, or ``coefficient`` is missing
+    or non-finite, the panel falls back to the spend-invariant rendering so
+    the chart still composes for any engine that doesn't expose the full
+    adstock + Hill parameter set.
     """
     if not channels:
         return _empty_chart_svg("No response curves to display.")
@@ -484,13 +486,14 @@ def _response_curve_panel(channel: dict[str, Any], w: int, h: int) -> str:
     invariant = bool(channel.get("spend_invariant", False))
     spend_min = float(channel.get("observed_spend_min", 0.0))
     spend_max = float(channel.get("observed_spend_max", 0.0))
+    half_life = channel.get("half_life")
     ec50 = channel.get("ec50")
     slope = channel.get("slope")
     coefficient = channel.get("coefficient")
 
     parameters_ok = all(
         isinstance(v, int | float) and v == v and v > 0  # not NaN, positive
-        for v in (ec50, slope, coefficient)
+        for v in (half_life, ec50, slope, coefficient)
     )
 
     pad_top = 28
@@ -523,11 +526,23 @@ def _response_curve_panel(channel: dict[str, Any], w: int, h: int) -> str:
         )
         return "".join(parts)
 
-    # Domain: 0 to ~1.5× the observed max so extrapolation is visible.
-    spend_domain_max = max(spend_max * 1.5, ec50 * 2.0, 1.0)
+    # Domain is raw weekly spend, but the model applies Hill saturation to
+    # adstocked spend. Use the steady-state weekly spend implied by EC50 so
+    # the displayed curve is on the same scale as the x-axis label.
+    decay = _half_life_to_decay(half_life)
+    weekly_ec50 = ec50 * max(1.0 - decay, 1e-12)
+    spend_domain_max = max(spend_max * 1.5, weekly_ec50 * 2.0, 1.0)
     n_samples = 64
     xs = [spend_domain_max * (k / (n_samples - 1)) for k in range(n_samples)]
-    ys = [_hill_contribution(s, ec50, slope, coefficient) for s in xs]
+    ys = [
+        _hill_contribution(
+            _steady_state_adstocked_spend(s, decay),
+            ec50,
+            slope,
+            coefficient,
+        )
+        for s in xs
+    ]
     y_max = max(ys) if ys else 1.0
     y_max = max(y_max, 1.0)
 
@@ -593,7 +608,7 @@ def _response_curve_panel(channel: dict[str, Any], w: int, h: int) -> str:
     parts.append(
         f'<text x="{pad_left + plot_w / 2:.1f}" y="{h - 6}" '
         f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="10" '
-        f'text-anchor="middle">Weekly spend (shaded = observed range)</text>'
+        f'text-anchor="middle">Steady weekly spend (shaded = observed range)</text>'
     )
 
     return "".join(parts)
@@ -613,6 +628,24 @@ def _hill_contribution(
     s_pow = spend ** slope
     e_pow = ec50 ** slope
     return float(coefficient) * (s_pow / (s_pow + e_pow + 1e-12))
+
+
+def _half_life_to_decay(half_life: float) -> float:
+    """Convert geometric adstock half-life to decay.
+
+    Mirrors ``wanamaker.transforms.adstock.half_life_to_decay`` without
+    importing transform code from report rendering.
+    """
+    return 0.5 ** (1.0 / half_life)
+
+
+def _steady_state_adstocked_spend(weekly_spend: float, decay: float) -> float:
+    """Map constant weekly spend to its geometric-adstock steady state.
+
+    The PyMC engine uses ``A_t = X_t + decay * A_{t-1}``. For a constant
+    spend level, the steady-state value is ``X / (1 - decay)``.
+    """
+    return weekly_spend / max(1.0 - decay, 1e-12)
 
 
 def _empty_chart_svg(message: str) -> str:

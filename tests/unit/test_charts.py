@@ -32,6 +32,7 @@ def _channel(
     confidence: str = "high",
     observed_spend_min: float = 1000.0,
     observed_spend_max: float = 5000.0,
+    half_life: float | None = 1.0,
     ec50: float | None = 3000.0,
     slope: float = 1.5,
     coefficient: float = 12000.0,
@@ -48,6 +49,7 @@ def _channel(
         "confidence": confidence,
         "observed_spend_min": observed_spend_min,
         "observed_spend_max": observed_spend_max,
+        "half_life": half_life,
         "ec50": ec50,
         "slope": slope,
         "coefficient": coefficient,
@@ -240,8 +242,9 @@ def test_response_curves_spend_invariant_shows_placeholder_no_curve() -> None:
 
 
 def test_response_curves_falls_back_when_parameters_missing() -> None:
-    """If ec50/slope/coefficient is None or non-positive, render the placeholder."""
+    """If adstock/Hill parameters are missing or non-positive, render the placeholder."""
     channels = [
+        _channel("missing_half_life", half_life=None),
         _channel("missing_ec50", ec50=None),
         _channel("zero_slope", slope=0.0),
         _channel("nan_coefficient", coefficient=float("nan")),
@@ -251,7 +254,7 @@ def test_response_curves_falls_back_when_parameters_missing() -> None:
 
     polylines = list(root.iter("{http://www.w3.org/2000/svg}polyline"))
     assert len(polylines) == 0
-    assert svg.count("Saturation curve not identifiable") == 3
+    assert svg.count("Saturation curve not identifiable") == 4
 
 
 def test_response_curves_handles_empty_input() -> None:

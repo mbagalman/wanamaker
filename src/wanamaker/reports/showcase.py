@@ -264,11 +264,11 @@ def _response_curve_channels(
     """Join channel summaries with their saturation parameters from ``summary.parameters``.
 
     The PyMC engine emits parameters with stable names like
-    ``channel.<name>.ec50``, ``channel.<name>.slope``, and
-    ``channel.<name>.coefficient`` (see ``ParameterSummary.name`` in
-    ``engine.summary``). Look those up by channel name; channels missing
-    any of the three are passed through and the chart helper falls back
-    to the spend-invariant rendering for them.
+    ``channel.<name>.half_life``, ``channel.<name>.ec50``,
+    ``channel.<name>.slope``, and ``channel.<name>.coefficient`` (see
+    ``ParameterSummary.name`` in ``engine.summary``). Look those up by
+    channel name; channels missing any of the four are passed through and
+    the chart helper falls back to the spend-invariant rendering for them.
     """
     by_name: dict[str, float] = {}
     for p in summary.parameters:
@@ -280,6 +280,7 @@ def _response_curve_channels(
         enriched.append(
             {
                 **ch,
+                "half_life": by_name.get(f"channel.{name}.half_life"),
                 "ec50": by_name.get(f"channel.{name}.ec50"),
                 "slope": by_name.get(f"channel.{name}.slope"),
                 "coefficient": by_name.get(f"channel.{name}.coefficient"),

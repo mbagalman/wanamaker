@@ -64,6 +64,13 @@ def _saturation_params(channel_name: str) -> list[ParameterSummary]:
     """Realistic Hill saturation parameters for one channel."""
     return [
         ParameterSummary(
+            name=f"channel.{channel_name}.half_life",
+            mean=1.0,
+            sd=0.2,
+            hdi_low=0.7,
+            hdi_high=1.4,
+        ),
+        ParameterSummary(
             name=f"channel.{channel_name}.ec50",
             mean=3000.0,
             sd=400.0,
