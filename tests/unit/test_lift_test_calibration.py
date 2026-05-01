@@ -7,7 +7,13 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from wanamaker.config import ChannelConfig, DataConfig, WanamakerConfig
+from wanamaker.config import (
+    CalibrationConfig,
+    ChannelConfig,
+    DataConfig,
+    LiftTestCalibrationConfig,
+    WanamakerConfig,
+)
 from wanamaker.data.io import load_lift_test_csv
 from wanamaker.engine.pymc import _coefficient_prior
 from wanamaker.model.builder import build_model_spec
@@ -162,6 +168,60 @@ def test_build_model_spec_converts_lift_tests_to_priors(tmp_path: Path) -> None:
     assert prior.mean_roi == pytest.approx(2.0)
     assert prior.sd_roi == pytest.approx(0.4, rel=1e-6)
     assert prior.confidence == pytest.approx(0.95)
+
+
+def test_build_model_spec_uses_calibration_config_priors(tmp_path: Path) -> None:
+    data_csv = tmp_path / "data.csv"
+    data_csv.write_text("week,revenue,search\n2024-01-01,100,10\n", encoding="utf-8")
+    lift_csv = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+        "search,2024-01-01,2024-01-14,2.0,1.216014,2.783986\n",
+    )
+    
+    cfg = WanamakerConfig(
+        data=DataConfig(
+            csv_path=data_csv,
+            date_column="week",
+            target_column="revenue",
+            spend_columns=["search"],
+        ),
+        channels=[ChannelConfig(name="search", category="paid_search")],
+        calibration=CalibrationConfig(
+            lift_tests=LiftTestCalibrationConfig(path=lift_csv)
+        ),
+    )
+    
+    spec = build_model_spec(cfg)
+    assert set(spec.lift_test_priors) == {"search"}
+    prior = spec.lift_test_priors["search"]
+    assert prior.mean_roi == pytest.approx(2.0)
+
+
+def test_config_rejects_conflicting_lift_test_paths(tmp_path: Path) -> None:
+    data_csv = tmp_path / "data.csv"
+    data_csv.write_text("week,revenue,search\n2024-01-01,100,10\n", encoding="utf-8")
+    lift_csv = tmp_path / "lift_tests.csv"
+    lift_csv.write_text(
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+        "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n",
+        encoding="utf-8",
+    )
+    
+    with pytest.raises(ValueError, match="Cannot specify both"):
+        WanamakerConfig(
+            data=DataConfig(
+                csv_path=data_csv,
+                date_column="week",
+                target_column="revenue",
+                spend_columns=["search"],
+                lift_test_csv=lift_csv,
+            ),
+            channels=[ChannelConfig(name="search", category="paid_search")],
+            calibration=CalibrationConfig(
+                lift_tests=LiftTestCalibrationConfig(path=lift_csv)
+            ),
+        )
 
 
 def test_build_model_spec_rejects_lift_test_for_unknown_channel(tmp_path: Path) -> None:

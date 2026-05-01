@@ -99,8 +99,9 @@ All user-facing configuration is validated here via pydantic before any other mo
 ```
 WanamakerConfig
 +-- DataConfig          csv_path, date_column, target_column,
-|                       spend_columns, control_columns, lift_test_csv
+|                       spend_columns, control_columns
 +-- ChannelConfig[]     name, category, adstock_family per channel
++-- CalibrationConfig   lift_tests (path, mode)
 +-- RefreshConfig       anchor_strength (preset or float)
 +-- RunConfig           seed, runtime_mode, artifact_dir
 ```

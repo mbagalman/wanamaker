@@ -112,7 +112,6 @@ data:
   csv_path: tutorial_data/data.csv
   date_column: week
   target_column: revenue
-  lift_test_csv: tutorial_data/lift_tests.csv
   spend_columns:
     - paid_search
     - paid_social
@@ -145,6 +144,10 @@ channels:
     category: affiliate
   - name: email
     category: email_crm
+
+calibration:
+  lift_tests:
+    path: tutorial_data/lift_tests.csv
 
 run:
   seed: 20260430
