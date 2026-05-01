@@ -421,6 +421,200 @@ def scenario_delta_svg(
     return "".join(parts)
 
 
+def response_curves_svg(channels: Sequence[dict[str, Any]]) -> str:
+    """Small-multiples grid of saturation curves, one panel per channel.
+
+    Each panel plots the channel's mean Hill saturation curve over a spend
+    domain that comfortably exceeds the historical range. A vertical band
+    marks the observed spend range so the reader can see where the curve
+    is supported by data and where it is extrapolation. Spend-invariant
+    channels render as a single annotated panel without a curve — there
+    is no defensible response shape when the data didn't move.
+
+    Each ``channels`` dict must include:
+      - ``name``, ``spend_invariant``, ``observed_spend_min``,
+        ``observed_spend_max``, ``mean_contribution``
+      - ``ec50`` (Hill EC50)
+      - ``slope`` (Hill slope)
+      - ``coefficient`` (saturated-spend → contribution scale factor)
+
+    When ``ec50``, ``slope``, or ``coefficient`` is missing or non-finite,
+    the panel falls back to the spend-invariant rendering so the chart
+    still composes for any engine that doesn't expose Hill parameters.
+    """
+    if not channels:
+        return _empty_chart_svg("No response curves to display.")
+
+    cols = 2
+    rows = (len(channels) + cols - 1) // cols
+    panel_w = 360
+    panel_h = 200
+    gap_x = 16
+    gap_y = 24
+    width = cols * panel_w + (cols - 1) * gap_x
+    height = rows * panel_h + (rows - 1) * gap_y
+
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" '
+        f'aria-label="Per-channel response (saturation) curves" '
+        f'class="wmk-chart wmk-chart--response-curves">'
+    )
+
+    for i, channel in enumerate(channels):
+        col = i % cols
+        row = i // cols
+        ox = col * (panel_w + gap_x)
+        oy = row * (panel_h + gap_y)
+        parts.append(
+            f'<g transform="translate({ox},{oy})">'
+            + _response_curve_panel(channel, panel_w, panel_h)
+            + "</g>"
+        )
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _response_curve_panel(channel: dict[str, Any], w: int, h: int) -> str:
+    """Render a single saturation-curve panel inside its own coordinate box."""
+    name = str(channel.get("name", ""))
+    invariant = bool(channel.get("spend_invariant", False))
+    spend_min = float(channel.get("observed_spend_min", 0.0))
+    spend_max = float(channel.get("observed_spend_max", 0.0))
+    ec50 = channel.get("ec50")
+    slope = channel.get("slope")
+    coefficient = channel.get("coefficient")
+
+    parameters_ok = all(
+        isinstance(v, int | float) and v == v and v > 0  # not NaN, positive
+        for v in (ec50, slope, coefficient)
+    )
+
+    pad_top = 28
+    pad_bottom = 36
+    pad_left = 48
+    pad_right = 16
+    plot_w = w - pad_left - pad_right
+    plot_h = h - pad_top - pad_bottom
+
+    parts: list[str] = []
+
+    # Frame + title.
+    parts.append(
+        f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" '
+        f'fill="white" stroke="{_GRID}" stroke-width="1" rx="4" ry="4"/>'
+    )
+    parts.append(
+        f'<text x="{pad_left}" y="18" fill="{_INK}" '
+        f'font-family="{_FONT_FAMILY}" font-size="12" font-weight="600" '
+        f'text-anchor="start">{escape(name)}</text>'
+    )
+
+    if invariant or not parameters_ok:
+        # No defensible curve. Render a muted placeholder.
+        parts.append(
+            f'<text x="{w / 2:.1f}" y="{h / 2:.1f}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'font-style="italic" text-anchor="middle">'
+            f'Saturation curve not identifiable from data</text>'
+        )
+        return "".join(parts)
+
+    # Domain: 0 to ~1.5× the observed max so extrapolation is visible.
+    spend_domain_max = max(spend_max * 1.5, ec50 * 2.0, 1.0)
+    n_samples = 64
+    xs = [spend_domain_max * (k / (n_samples - 1)) for k in range(n_samples)]
+    ys = [_hill_contribution(s, ec50, slope, coefficient) for s in xs]
+    y_max = max(ys) if ys else 1.0
+    y_max = max(y_max, 1.0)
+
+    def to_x(spend: float) -> float:
+        return pad_left + (spend / spend_domain_max) * plot_w
+
+    def to_y(value: float) -> float:
+        return pad_top + (1.0 - value / y_max) * plot_h
+
+    # Axes: zero baseline + left axis.
+    baseline_y = pad_top + plot_h
+    parts.append(
+        f'<line x1="{pad_left}" y1="{pad_top}" x2="{pad_left}" '
+        f'y2="{baseline_y}" stroke="{_MUTED}" stroke-width="1"/>'
+    )
+    parts.append(
+        f'<line x1="{pad_left}" y1="{baseline_y}" '
+        f'x2="{pad_left + plot_w}" y2="{baseline_y}" '
+        f'stroke="{_MUTED}" stroke-width="1"/>'
+    )
+
+    # Observed-spend range as a soft vertical band.
+    if spend_max > 0 and spend_min >= 0 and spend_max > spend_min:
+        band_x1 = to_x(spend_min)
+        band_x2 = to_x(spend_max)
+        parts.append(
+            f'<rect x="{band_x1:.1f}" y="{pad_top}" '
+            f'width="{band_x2 - band_x1:.1f}" height="{plot_h}" '
+            f'fill="{_PRIMARY_LIGHT}" fill-opacity="0.18"/>'
+        )
+
+    # Curve.
+    point_strs = [f"{to_x(xs[k]):.1f},{to_y(ys[k]):.1f}" for k in range(n_samples)]
+    parts.append(
+        f'<polyline points="{" ".join(point_strs)}" '
+        f'fill="none" stroke="{_PRIMARY}" stroke-width="2" '
+        f'stroke-linejoin="round"/>'
+    )
+
+    # X-axis labels — start, observed-max, domain end.
+    label_pts = [(0.0, "0"), (spend_max, _fmt_int(spend_max)), (spend_domain_max, "")]
+    seen_x: set[int] = set()
+    for spend, label in label_pts:
+        if not label:
+            continue
+        gx = to_x(spend)
+        gx_rounded = int(round(gx))
+        if gx_rounded in seen_x:
+            continue
+        seen_x.add(gx_rounded)
+        parts.append(
+            f'<line x1="{gx:.1f}" y1="{baseline_y}" '
+            f'x2="{gx:.1f}" y2="{baseline_y + 4}" '
+            f'stroke="{_MUTED}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{gx:.1f}" y="{baseline_y + 18}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="10" '
+            f'text-anchor="middle">{escape(label)}</text>'
+        )
+
+    # Footnote: spend axis label.
+    parts.append(
+        f'<text x="{pad_left + plot_w / 2:.1f}" y="{h - 6}" '
+        f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="10" '
+        f'text-anchor="middle">Weekly spend (shaded = observed range)</text>'
+    )
+
+    return "".join(parts)
+
+
+def _hill_contribution(
+    spend: float, ec50: float, slope: float, coefficient: float
+) -> float:
+    """Hill saturation × coefficient evaluated at ``spend``.
+
+    Mirrors ``_hill_saturation_tensor`` in the PyMC engine — same shape,
+    same semantics, just plain Python so the chart can render without an
+    engine import.
+    """
+    if spend <= 0.0:
+        return 0.0
+    s_pow = spend ** slope
+    e_pow = ec50 ** slope
+    return float(coefficient) * (s_pow / (s_pow + e_pow + 1e-12))
+
+
 def _empty_chart_svg(message: str) -> str:
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" '

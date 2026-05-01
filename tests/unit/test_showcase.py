@@ -21,6 +21,7 @@ import pytest
 from wanamaker.engine.summary import (
     ChannelContributionSummary,
     ConvergenceSummary,
+    ParameterSummary,
     PosteriorSummary,
     PredictiveSummary,
 )
@@ -59,13 +60,42 @@ def _channel(
     )
 
 
+def _saturation_params(channel_name: str) -> list[ParameterSummary]:
+    """Realistic Hill saturation parameters for one channel."""
+    return [
+        ParameterSummary(
+            name=f"channel.{channel_name}.ec50",
+            mean=3000.0,
+            sd=400.0,
+            hdi_low=2200.0,
+            hdi_high=3800.0,
+        ),
+        ParameterSummary(
+            name=f"channel.{channel_name}.slope",
+            mean=1.5,
+            sd=0.2,
+            hdi_low=1.1,
+            hdi_high=1.9,
+        ),
+        ParameterSummary(
+            name=f"channel.{channel_name}.coefficient",
+            mean=12000.0,
+            sd=1500.0,
+            hdi_low=9000.0,
+            hdi_high=15000.0,
+        ),
+    ]
+
+
 def _summary(
     *channels: ChannelContributionSummary,
     periods: list[str] | None = None,
+    parameters: list[ParameterSummary] | None = None,
 ) -> PosteriorSummary:
     if periods is None:
         periods = ["2024-01-01", "2024-01-08", "2024-01-15"]
     return PosteriorSummary(
+        parameters=list(parameters) if parameters else [],
         channel_contributions=list(channels),
         convergence=ConvergenceSummary(
             max_r_hat=1.005,
@@ -145,6 +175,7 @@ def test_includes_all_required_sections() -> None:
         "executive-summary",
         "channel-contributions",
         "channel-roi",
+        "response-curves",
         "trust-card",
     ):
         assert f'id="{section_id}"' in html, f"missing #{section_id}"
@@ -171,12 +202,13 @@ def test_charts_inline_as_svg() -> None:
     card = _card(("convergence", TrustStatus.PASS, "OK."))
     html = _render(summary, card)
 
-    # Two SVGs minimum (contribution + ROI). Scenario chart only when
-    # --scenario is supplied; tested separately.
+    # Three SVGs minimum (contribution + ROI + response curves). Scenario
+    # chart only when --scenario is supplied; tested separately.
     svg_count = html.count("<svg")
-    assert svg_count >= 2, f"expected >= 2 inline SVGs, got {svg_count}"
+    assert svg_count >= 3, f"expected >= 3 inline SVGs, got {svg_count}"
     assert "wmk-chart--contributions" in html
     assert "wmk-chart--roi" in html
+    assert "wmk-chart--response-curves" in html
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +254,38 @@ def test_verdict_pill_moderate_when_only_moderates() -> None:
 
     assert "wmk-pill--moderate" in html
     assert "Mixed evidence" in html
+
+
+# ---------------------------------------------------------------------------
+# Response curves
+# ---------------------------------------------------------------------------
+
+
+def test_response_curves_rendered_when_saturation_params_present() -> None:
+    summary = _summary(
+        _channel("paid_search"),
+        parameters=_saturation_params("paid_search"),
+    )
+    card = _card(("convergence", TrustStatus.PASS, "OK."))
+    html = _render(summary, card)
+
+    assert 'id="response-curves"' in html
+    assert "wmk-chart--response-curves" in html
+    # Polyline = the saturation curve. Substring check is enough; the
+    # chart helper's own tests cover the shape.
+    assert "<polyline" in html
+    assert "Saturation curve not identifiable" not in html
+
+
+def test_response_curves_section_falls_back_when_params_missing() -> None:
+    """No parameters -> the section still renders, but each panel shows
+    the placeholder text instead of a curve."""
+    summary = _summary(_channel("paid_search"), parameters=None)
+    card = _card(("convergence", TrustStatus.PASS, "OK."))
+    html = _render(summary, card)
+
+    assert 'id="response-curves"' in html
+    assert "Saturation curve not identifiable" in html
 
 
 # ---------------------------------------------------------------------------
