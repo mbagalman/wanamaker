@@ -1,0 +1,233 @@
+{# HTML showcase template (FR-5.3 / FR-5.4 in HTML form).
+
+   Voice: same dry, direct, honest tone as the Markdown report. The
+   showcase exists so a reader can forward a single self-contained file
+   ("show your CMO") and have it render identically in any modern
+   browser, Outlook preview, or print.
+
+   Required context keys (built by build_showcase_context):
+     - title, run_id, generated_at, runtime_mode, package_version,
+       data_hash, run_fingerprint, engine_label
+     - period_start, period_end, n_periods
+     - total_media_contribution
+     - channels: list of channel views (already ranked, with confidence)
+     - trust_card_pill: {status, label, explanation}
+     - trust_dimensions: list of {name, status, explanation, decision_note}
+     - has_invariant_channels
+     - contribution_chart_svg, roi_chart_svg, scenario_chart_svg
+     - scenario: optional {plan_name, mean_total, hdi_low_total,
+                          hdi_high_total, baseline_total, delta,
+                          extrapolation_warnings}
+     - refresh_narrative: optional {previous_run_id, n_movements,
+                                    n_unexplained, unexplained_fraction,
+                                    movements_by_class}
+#}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{{ title }}</title>
+<style>
+{{ stylesheet | safe }}
+</style>
+</head>
+<body>
+<main>
+
+<header class="wmk-header">
+  <div>
+    <h1>{{ title }}</h1>
+    <div class="wmk-meta-line">
+      Period <strong>{{ period_start }}</strong> – <strong>{{ period_end }}</strong>
+      ({{ n_periods }} periods)
+    </div>
+  </div>
+  <div class="wmk-meta">
+    <div>Run <code>{{ run_id }}</code></div>
+    <div>Generated {{ generated_at }}</div>
+    <div>{{ runtime_mode }} mode · wanamaker {{ package_version }}</div>
+  </div>
+</header>
+
+<section id="verdict" class="wmk-verdict-section">
+  <div class="wmk-verdict">
+    <span class="wmk-verdict__pill wmk-pill--{{ trust_card_pill.status }}">
+      {{ trust_card_pill.label }}
+    </span>
+    <div class="wmk-verdict__text">{{ trust_card_pill.explanation }}</div>
+  </div>
+</section>
+
+<section id="executive-summary">
+  <h2>Executive summary</h2>
+  {% if channels %}
+  {% set top = channels[0] %}
+  <p class="wmk-prose">
+    Across this period, paid media contributed an estimated
+    <strong>{{ "{:,.0f}".format(total_media_contribution) }}</strong>
+    to the target.
+    {% if top.confidence == "high" %}
+    <code>{{ top.name }}</code> was the largest contributor at
+    <strong>{{ "{:,.0f}".format(top.contribution_mean) }}</strong>
+    ({{ "{:.0%}".format(top.share_of_effect) }} of media impact),
+    with a 95% credible interval of
+    {{ "{:,.0f}".format(top.contribution_hdi_low) }}–{{ "{:,.0f}".format(top.contribution_hdi_high) }}.
+    {% elif top.confidence == "moderate" %}
+    The model's best point estimate is that <code>{{ top.name }}</code> was
+    the largest contributor at
+    {{ "{:,.0f}".format(top.contribution_mean) }}
+    ({{ "{:.0%}".format(top.share_of_effect) }} of media impact),
+    with a wide 95% credible interval of
+    {{ "{:,.0f}".format(top.contribution_hdi_low) }}–{{ "{:,.0f}".format(top.contribution_hdi_high) }}.
+    The ranking is plausible but not tight.
+    {% else %}
+    The largest point estimate is <code>{{ top.name }}</code> at
+    {{ "{:,.0f}".format(top.contribution_mean) }}, but the data does not
+    strongly support that ranking — its 95% credible interval is
+    {{ "{:,.0f}".format(top.contribution_hdi_low) }}–{{ "{:,.0f}".format(top.contribution_hdi_high) }}.
+    Treat the ordering as suggestive, not decided.
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="wmk-prose">No channel contributions were available for this run.</p>
+  {% endif %}
+</section>
+
+<section id="channel-contributions">
+  <h2>Channel contributions</h2>
+  <p class="wmk-chart-caption">
+    Bars show mean contribution; whiskers show the 95% credible interval.
+    Hatched bars are spend-invariant — saturation could not be estimated
+    from the observed data.
+  </p>
+  {{ contribution_chart_svg | safe }}
+
+  <table class="wmk-table">
+    <thead>
+      <tr>
+        <th>Channel</th>
+        <th class="wmk-num">Contribution</th>
+        <th class="wmk-num">95% credible interval</th>
+        <th class="wmk-num">Share of media</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for channel in channels %}
+      <tr>
+        <td><code>{{ channel.name }}</code></td>
+        <td class="wmk-num">{{ "{:,.0f}".format(channel.contribution_mean) }}</td>
+        <td class="wmk-num">
+          {{ "{:,.0f}".format(channel.contribution_hdi_low) }}–{{ "{:,.0f}".format(channel.contribution_hdi_high) }}
+        </td>
+        <td class="wmk-num">{{ "{:.0%}".format(channel.share_of_effect) }}</td>
+        <td>
+          <span class="wmk-confidence wmk-confidence--{{ channel.confidence }}">
+            {{ channel.confidence }}
+          </span>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section id="channel-roi">
+  <h2>Return on investment</h2>
+  <p class="wmk-chart-caption">
+    Dots show mean ROI; bars show the 95% credible interval. Spend-invariant
+    channels are listed without a defensible ROI.
+  </p>
+  {{ roi_chart_svg | safe }}
+</section>
+
+{% if scenario %}
+<section id="scenario">
+  <h2>Forecast: {{ scenario.plan_name }}</h2>
+  <p class="wmk-prose">
+    Predicted total over the plan window:
+    <strong>{{ "{:,.0f}".format(scenario.mean_total) }}</strong>
+    (95% credible interval
+    {{ "{:,.0f}".format(scenario.hdi_low_total) }}–{{ "{:,.0f}".format(scenario.hdi_high_total) }}).
+    {% if scenario.baseline_total is not none %}
+    That is a change of <strong>{{ "{:+,.0f}".format(scenario.delta) }}</strong>
+    versus the baseline plan.
+    {% endif %}
+  </p>
+  {{ scenario_chart_svg | safe }}
+  {% if scenario.extrapolation_warnings %}
+  <p class="wmk-prose">
+    <strong>Extrapolation warning:</strong> the following channels exceed the
+    spend range observed during training and the model has no direct
+    evidence at those levels —
+    {% for w in scenario.extrapolation_warnings %}<code>{{ w }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+    Treat as a staged-test candidate, not as proof the move is safe.
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section id="trust-card">
+  <h2>Model Trust Card</h2>
+  <p class="wmk-prose">
+    The Trust Card flags failure modes Wanamaker can detect from the fit
+    itself. A weak dimension does not always mean the whole model is
+    useless — it means the affected output needs caution.
+  </p>
+  <div class="wmk-trust-grid">
+    {% for d in trust_dimensions %}
+    <div class="wmk-trust-card">
+      <div class="wmk-trust-card__head">
+        <span class="wmk-trust-card__name">{{ d.name }}</span>
+        <span class="wmk-trust-card__pill wmk-pill--{{ d.status }}">{{ d.status }}</span>
+      </div>
+      <p class="wmk-trust-card__explanation">{{ d.explanation }}</p>
+      {% if d.decision_note %}
+      <p class="wmk-trust-card__decision">{{ d.decision_note }}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if has_invariant_channels %}
+  <p class="wmk-prose" style="margin-top: 16px;">
+    Saturation cannot be estimated from observed data for channels marked
+    spend-invariant in the contribution table. The Experiment Advisor will
+    not recommend reallocations involving those channels (FR-3.2).
+  </p>
+  {% endif %}
+</section>
+
+{% if refresh_narrative %}
+<section id="refresh-diff">
+  <h2>Refresh notes</h2>
+  <p class="wmk-prose">
+    This run is a refresh of <code>{{ refresh_narrative.previous_run_id }}</code>.
+    Across {{ refresh_narrative.n_movements }} parameter movement(s),
+    <strong>{{ refresh_narrative.n_unexplained }}</strong> were classified as
+    unexplained ({{ "{:.0%}".format(refresh_narrative.unexplained_fraction) }}).
+  </p>
+  {% if refresh_narrative.movements_by_class %}
+  <table class="wmk-table">
+    <thead>
+      <tr><th>Class</th><th class="wmk-num">Movements</th></tr>
+    </thead>
+    <tbody>
+      {% for cls, n in refresh_narrative.movements_by_class.items() %}
+      <tr><td>{{ cls }}</td><td class="wmk-num">{{ n }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
+<footer class="wmk-footer">
+  <span>Generated by wanamaker {{ package_version }}</span>
+  <span>Engine: {{ engine_label }}</span>
+  <span>Data hash: <code>{{ data_hash }}</code></span>
+  <span>Fingerprint: <code>{{ run_fingerprint }}</code></span>
+</footer>
+
+</main>
+</body>
+</html>

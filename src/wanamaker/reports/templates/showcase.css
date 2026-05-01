@@ -1,0 +1,299 @@
+/* showcase stylesheet — inlined into the HTML <style> block at render time.
+   No external fonts, no CDN, no JS. System font stack only.
+*/
+:root {
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --bg: #ffffff;
+  --bg-soft: #f8fafc;
+  --primary: #2b5876;
+  --primary-soft: #eef4f8;
+  --pass: #059669;
+  --pass-soft: #ecfdf5;
+  --moderate: #d97706;
+  --moderate-soft: #fff7ed;
+  --weak: #dc2626;
+  --weak-soft: #fef2f2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+header.wmk-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+header.wmk-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.01em;
+}
+
+header.wmk-header .wmk-meta {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+section {
+  margin: 32px 0;
+}
+
+section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  letter-spacing: -0.005em;
+}
+
+section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+}
+
+p {
+  margin: 8px 0;
+}
+
+p.wmk-prose {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: var(--bg-soft);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Verdict band ---------------------------------------------------------- */
+
+.wmk-verdict {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  margin-bottom: 24px;
+}
+
+.wmk-verdict__pill {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.wmk-pill--pass {
+  background: var(--pass-soft);
+  color: var(--pass);
+  border: 1px solid var(--pass);
+}
+
+.wmk-pill--moderate {
+  background: var(--moderate-soft);
+  color: var(--moderate);
+  border: 1px solid var(--moderate);
+}
+
+.wmk-pill--weak {
+  background: var(--weak-soft);
+  color: var(--weak);
+  border: 1px solid var(--weak);
+}
+
+.wmk-verdict__text {
+  flex: 1 1 auto;
+  font-size: 14px;
+}
+
+/* Tables ---------------------------------------------------------------- */
+
+table.wmk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.wmk-table th,
+table.wmk-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+table.wmk-table th {
+  background: var(--bg-soft);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+table.wmk-table td.wmk-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wmk-confidence {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.wmk-confidence--high {
+  background: var(--pass-soft);
+  color: var(--pass);
+}
+
+.wmk-confidence--moderate {
+  background: var(--moderate-soft);
+  color: var(--moderate);
+}
+
+.wmk-confidence--weak {
+  background: var(--weak-soft);
+  color: var(--weak);
+}
+
+/* Trust card grid ------------------------------------------------------- */
+
+.wmk-trust-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.wmk-trust-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 16px;
+  background: var(--bg);
+}
+
+.wmk-trust-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.wmk-trust-card__name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.wmk-trust-card__pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.wmk-trust-card__explanation {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.wmk-trust-card__decision {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Charts ---------------------------------------------------------------- */
+
+.wmk-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 8px 0 4px 0;
+}
+
+.wmk-chart-caption {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+}
+
+/* Footer ---------------------------------------------------------------- */
+
+footer.wmk-footer {
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+footer.wmk-footer code {
+  font-size: 11px;
+}
+
+@media print {
+  body {
+    background: white;
+  }
+  main {
+    box-shadow: none;
+    max-width: none;
+    padding: 0;
+  }
+}
