@@ -8,3 +8,7 @@ v1.1 will additionally recommend experiment designs (geo holdout vs.
 budget split, sample size, duration, geo selection) — deferred per
 BRD/PRD §4.2.
 """
+
+from wanamaker.advisor.channel_flagging import ChannelFlag, flag_channels
+
+__all__ = ["ChannelFlag", "flag_channels"]

@@ -236,9 +236,12 @@ class TestReportHappyPath:
         body = custom.read_text()
         assert "# Executive summary" in body and "# Model Trust Card" in body
 
-    def test_advisor_not_implemented_falls_back_cleanly(self, tmp_path: Path) -> None:
-        """Issue #29 (advisor) is not yet implemented. The report wiring must
-        not crash; weak channels still get the template's fallback bullet."""
+    def test_advisor_rationale_appears_for_wide_posterior_channel(
+        self, tmp_path: Path,
+    ) -> None:
+        """A high-share, wide-HDI channel must surface the advisor's
+        rationale in the Recommended actions section, with real spend
+        from the training data quoted in the bullet."""
         artifact_dir = tmp_path / ".wanamaker"
         csv = _write_data_csv(tmp_path)
         weak_summary = PosteriorSummary(
@@ -271,5 +274,9 @@ class TestReportHappyPath:
         )
         assert result.exit_code == 0, result.output
         body = (run_dir / "report.md").read_text()
-        # Template fallback fires for the weak channel.
-        assert "Consider an experiment for **`search`**" in body
+        # The advisor's rationale (issue #29) replaces the template fallback.
+        assert "Channel `search` has high posterior uncertainty" in body
+        assert "controlled experiment" in body
+        # Spend phrase quotes real spend from the training data
+        # (search column sums to 51 in the toy CSV).
+        assert "significant spend (51)" in body

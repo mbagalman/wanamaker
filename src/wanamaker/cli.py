@@ -383,6 +383,7 @@ def report(
 
     cfg = load_config(paths.config)
     lift_test_priors = _load_lift_priors_if_any(cfg)
+    spend_by_channel = _spend_by_channel_from_training_data(cfg)
 
     trust_card = build_trust_card(
         summary,
@@ -396,7 +397,9 @@ def report(
         summary,
         trust_card,
         refresh_diff=refresh_diff,
-        advisor_recommendations=_safe_advisor_recommendations(summary),
+        advisor_recommendations=_safe_advisor_recommendations(
+            summary, spend_by_channel=spend_by_channel,
+        ),
         trust_card_link="#model-trust-card",
     )
     trust_context = build_trust_card_context(summary, trust_card)
@@ -1350,24 +1353,46 @@ def _load_lift_priors_if_any(cfg: Any) -> Any:
     return spec.lift_test_priors or None
 
 
-def _safe_advisor_recommendations(summary: Any) -> list[str]:
-    """Best-effort Experiment Advisor bullets, with a clean fallback.
+def _safe_advisor_recommendations(
+    summary: Any,
+    *,
+    spend_by_channel: dict[str, float] | None = None,
+) -> list[str]:
+    """Experiment Advisor bullets for the executive summary.
 
-    The advisor (#29) is not yet implemented. The exec-summary template
-    falls back to its own "consider an experiment for weak channels"
-    text when this returns an empty list, so the report stays useful in
-    the meantime.
+    Each ``ChannelFlag.rationale`` is already a complete sentence
+    (per FR-5.5), so the report bullets are the rationales verbatim —
+    no extra prefix here.
+
+    ``NotImplementedError`` is caught in case a future engine swap or
+    advisor refactor reverts to a stub; in that case the executive
+    summary falls back to its own "consider an experiment for weak
+    channel X" template logic.
     """
-    from wanamaker.advisor.channel_flagging import flag_channels
+    from wanamaker.advisor import flag_channels
 
     try:
-        flags = flag_channels(summary, None)  # type: ignore[arg-type]
+        flags = flag_channels(summary, spend_by_channel=spend_by_channel)
     except NotImplementedError:
         return []
-    return [
-        f"Consider an experiment for `{flag.channel}`: {flag.rationale}"
-        for flag in flags
-    ]
+    return [flag.rationale for flag in flags]
+
+
+def _spend_by_channel_from_training_data(cfg: Any) -> dict[str, float] | None:
+    """Total spend per channel over the training window, or ``None``.
+
+    Used by the report command so the Experiment Advisor's rationale
+    can quote actual dollar spend rather than a modelled-contribution
+    proxy. Returns ``None`` when the config does not list spend
+    columns; the advisor handles that fallback cleanly.
+    """
+    from wanamaker.data.io import load_input_csv
+
+    spend_columns = list(cfg.data.spend_columns or [])
+    if not spend_columns:
+        return None
+    data = load_input_csv(cfg.data)
+    return {column: float(data[column].sum()) for column in spend_columns}
 
 
 if __name__ == "__main__":  # pragma: no cover
