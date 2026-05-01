@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescape
+from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from wanamaker.engine.summary import (
     ChannelContributionSummary,
@@ -43,9 +43,23 @@ _HIGH_CONFIDENCE_RATIO = 0.5
 _MODERATE_CONFIDENCE_RATIO = 1.0
 
 
+def _autoescape_for(template_name: str | None) -> bool:
+    """Autoescape HTML templates only.
+
+    ``select_autoescape(["html"])`` strips the last extension and matches
+    against it; that breaks for our convention of double-suffix names
+    like ``showcase.html.j2``. This predicate matches both single
+    (``.html``) and Jinja-suffixed (``.html.j2``) names so the showcase
+    is autoescaped while the Markdown ``.md.j2`` templates are not.
+    """
+    if template_name is None:
+        return False
+    return template_name.endswith((".html", ".html.j2", ".htm", ".htm.j2"))
+
+
 _env = Environment(
     loader=PackageLoader("wanamaker.reports", "templates"),
-    autoescape=select_autoescape(["html"]),
+    autoescape=_autoescape_for,
     undefined=StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,

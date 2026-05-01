@@ -1,0 +1,444 @@
+"""Hand-rolled SVG chart helpers for the HTML showcase.
+
+Hand-written rather than ``matplotlib``-driven so the byte output is fully
+deterministic across platforms (no font fallbacks, no rasterisation, no
+locale-dependent floats). That keeps the showcase HTML golden-file testable
+and aligned with the project's deterministic-template ethos
+(see ``reports/__init__.py``).
+
+Each public helper takes plain dicts (already shaped by ``render.py``) and
+returns a complete ``<svg>...</svg>`` string. The HTML template inlines the
+result with ``| safe``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from html import escape
+from typing import Any
+
+# Palette — single source of truth so the CSS and the SVG agree.
+_INK = "#0f172a"          # near-black for text
+_MUTED = "#64748b"        # muted grey for axes/ticks
+_PRIMARY = "#2b5876"      # deep blue for bars
+_PRIMARY_LIGHT = "#7c9bb3"
+_HDI = "#94a3b8"          # whisker grey
+_PASS = "#059669"
+_MODERATE = "#d97706"
+_WEAK = "#dc2626"
+_GRID = "#e2e8f0"
+
+# Fonts: stack of system fonts. No external font files.
+_FONT_FAMILY = (
+    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
+    "'Helvetica Neue', Arial, sans-serif"
+)
+
+
+def _fmt_int(x: float) -> str:
+    return f"{x:,.0f}"
+
+
+def _fmt_2(x: float) -> str:
+    return f"{x:.2f}"
+
+
+def _confidence_color(confidence: str) -> str:
+    if confidence == "high":
+        return _PASS
+    if confidence == "moderate":
+        return _MODERATE
+    return _WEAK
+
+
+def contribution_bars_svg(channels: Sequence[dict[str, Any]]) -> str:
+    """Horizontal bar chart of channel contributions with 95% HDI whiskers.
+
+    ``channels`` matches the dicts produced by ``_channel_view`` in
+    ``render.py`` (already pre-ranked by mean contribution). Spend-invariant
+    channels render with a hatched fill to flag that the saturation curve
+    came from priors only.
+    """
+    if not channels:
+        return _empty_chart_svg("No channel contributions to display.")
+
+    width = 720
+    row_height = 32
+    top_pad = 24
+    bottom_pad = 48
+    left_pad = 160
+    right_pad = 80
+    bar_height = 18
+
+    n = len(channels)
+    height = top_pad + row_height * n + bottom_pad
+
+    # Domain is [0, max(hdi_high, mean)] across channels, clamped to >=1.
+    max_value = max(
+        max(c["contribution_hdi_high"], c["contribution_mean"]) for c in channels
+    )
+    max_value = max(max_value, 1.0)
+    plot_width = width - left_pad - right_pad
+
+    def x(value: float) -> float:
+        return left_pad + (value / max_value) * plot_width
+
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" '
+        f'aria-label="Channel contributions with 95% credible intervals" '
+        f'class="wmk-chart wmk-chart--contributions">'
+    )
+    parts.append(_hatch_pattern_def("wmk-hatch-invariant", _PRIMARY_LIGHT))
+
+    # X-axis baseline + ticks at 0, 25%, 50%, 75%, 100% of max.
+    baseline_y = top_pad + row_height * n + 6
+    parts.append(
+        f'<line x1="{left_pad}" y1="{top_pad - 4}" x2="{left_pad}" '
+        f'y2="{baseline_y}" stroke="{_MUTED}" stroke-width="1"/>'
+    )
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        tick_x = left_pad + frac * plot_width
+        tick_value = frac * max_value
+        parts.append(
+            f'<line x1="{tick_x:.1f}" y1="{baseline_y}" '
+            f'x2="{tick_x:.1f}" y2="{baseline_y + 4}" '
+            f'stroke="{_MUTED}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{tick_x:.1f}" y="{baseline_y + 18}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="middle">{_fmt_int(tick_value)}</text>'
+        )
+        if frac > 0:
+            parts.append(
+                f'<line x1="{tick_x:.1f}" y1="{top_pad - 4}" '
+                f'x2="{tick_x:.1f}" y2="{baseline_y}" '
+                f'stroke="{_GRID}" stroke-width="1" stroke-dasharray="2,3"/>'
+            )
+
+    # One row per channel.
+    for i, channel in enumerate(channels):
+        row_y = top_pad + i * row_height
+        bar_y = row_y + (row_height - bar_height) / 2
+        mean_x = x(channel["contribution_mean"])
+        hdi_low_x = x(max(channel["contribution_hdi_low"], 0.0))
+        hdi_high_x = x(channel["contribution_hdi_high"])
+        invariant = channel.get("spend_invariant", False)
+        fill = (
+            "url(#wmk-hatch-invariant)" if invariant else _PRIMARY
+        )
+        # Channel label (left).
+        parts.append(
+            f'<text x="{left_pad - 10}" y="{row_y + row_height / 2 + 4:.1f}" '
+            f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="12" '
+            f'text-anchor="end" '
+            f'font-weight="500">{escape(str(channel["name"]))}</text>'
+        )
+        # Bar from 0 to mean.
+        bar_width = max(mean_x - left_pad, 0.0)
+        parts.append(
+            f'<rect x="{left_pad}" y="{bar_y:.1f}" '
+            f'width="{bar_width:.1f}" height="{bar_height}" '
+            f'fill="{fill}" rx="2" ry="2"/>'
+        )
+        # HDI whisker (low → high) at the bar's vertical centre.
+        whisker_y = bar_y + bar_height / 2
+        parts.append(
+            f'<line x1="{hdi_low_x:.1f}" y1="{whisker_y:.1f}" '
+            f'x2="{hdi_high_x:.1f}" y2="{whisker_y:.1f}" '
+            f'stroke="{_HDI}" stroke-width="2"/>'
+        )
+        for cap_x in (hdi_low_x, hdi_high_x):
+            parts.append(
+                f'<line x1="{cap_x:.1f}" y1="{whisker_y - 5:.1f}" '
+                f'x2="{cap_x:.1f}" y2="{whisker_y + 5:.1f}" '
+                f'stroke="{_HDI}" stroke-width="2"/>'
+            )
+        # Value label (right).
+        label_x = max(hdi_high_x, mean_x) + 8
+        parts.append(
+            f'<text x="{label_x:.1f}" y="{row_y + row_height / 2 + 4:.1f}" '
+            f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="start">'
+            f'{_fmt_int(channel["contribution_mean"])}</text>'
+        )
+
+    # X-axis label.
+    parts.append(
+        f'<text x="{left_pad + plot_width / 2:.1f}" y="{height - 8}" '
+        f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+        f'text-anchor="middle">Estimated contribution (target units)</text>'
+    )
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def roi_dotplot_svg(channels: Sequence[dict[str, Any]]) -> str:
+    """Per-channel ROI mean with a 95% HDI line.
+
+    Spend-invariant channels are rendered as a flat label only — there is
+    no defensible ROI for a curve that wasn't learned from data.
+    """
+    if not channels:
+        return _empty_chart_svg("No ROI estimates to display.")
+
+    width = 720
+    row_height = 28
+    top_pad = 24
+    bottom_pad = 44
+    left_pad = 160
+    right_pad = 80
+    n = len(channels)
+    height = top_pad + row_height * n + bottom_pad
+
+    measurable = [c for c in channels if not c.get("spend_invariant", False)]
+    if measurable:
+        domain_low = min(c["roi_hdi_low"] for c in measurable)
+        domain_high = max(c["roi_hdi_high"] for c in measurable)
+    else:
+        domain_low, domain_high = 0.0, 1.0
+    domain_low = min(domain_low, 0.0)
+    domain_high = max(domain_high, domain_low + 0.5)
+    plot_width = width - left_pad - right_pad
+    span = domain_high - domain_low
+
+    def x(value: float) -> float:
+        return left_pad + ((value - domain_low) / span) * plot_width
+
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" aria-label="Channel ROI with 95% credible intervals" '
+        f'class="wmk-chart wmk-chart--roi">'
+    )
+
+    baseline_y = top_pad + row_height * n + 6
+    # Ticks at 0, 25%, 50%, 75%, 100% of span.
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        tick_x = left_pad + frac * plot_width
+        tick_value = domain_low + frac * span
+        parts.append(
+            f'<line x1="{tick_x:.1f}" y1="{baseline_y}" '
+            f'x2="{tick_x:.1f}" y2="{baseline_y + 4}" '
+            f'stroke="{_MUTED}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{tick_x:.1f}" y="{baseline_y + 18}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="middle">{_fmt_2(tick_value)}</text>'
+        )
+        if frac > 0:
+            parts.append(
+                f'<line x1="{tick_x:.1f}" y1="{top_pad - 4}" '
+                f'x2="{tick_x:.1f}" y2="{baseline_y}" '
+                f'stroke="{_GRID}" stroke-width="1" stroke-dasharray="2,3"/>'
+            )
+
+    # Zero line if 0 is inside the domain.
+    if domain_low < 0 < domain_high:
+        zero_x = x(0.0)
+        parts.append(
+            f'<line x1="{zero_x:.1f}" y1="{top_pad - 4}" '
+            f'x2="{zero_x:.1f}" y2="{baseline_y}" '
+            f'stroke="{_MUTED}" stroke-width="1" stroke-dasharray="3,3"/>'
+        )
+
+    for i, channel in enumerate(channels):
+        row_y = top_pad + i * row_height + row_height / 2
+        confidence = channel.get("confidence", "weak")
+        invariant = channel.get("spend_invariant", False)
+        # Channel label.
+        parts.append(
+            f'<text x="{left_pad - 10}" y="{row_y + 4:.1f}" '
+            f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="12" '
+            f'text-anchor="end" '
+            f'font-weight="500">{escape(str(channel["name"]))}</text>'
+        )
+        if invariant:
+            parts.append(
+                f'<text x="{left_pad}" y="{row_y + 4:.1f}" '
+                f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+                f'font-style="italic" text-anchor="start">'
+                f'spend invariant — ROI not identifiable</text>'
+            )
+            continue
+        color = _confidence_color(confidence)
+        hdi_low_x = x(channel["roi_hdi_low"])
+        hdi_high_x = x(channel["roi_hdi_high"])
+        mean_x = x(channel["roi_mean"])
+        # HDI line.
+        parts.append(
+            f'<line x1="{hdi_low_x:.1f}" y1="{row_y:.1f}" '
+            f'x2="{hdi_high_x:.1f}" y2="{row_y:.1f}" '
+            f'stroke="{_HDI}" stroke-width="2"/>'
+        )
+        for cap_x in (hdi_low_x, hdi_high_x):
+            parts.append(
+                f'<line x1="{cap_x:.1f}" y1="{row_y - 5:.1f}" '
+                f'x2="{cap_x:.1f}" y2="{row_y + 5:.1f}" '
+                f'stroke="{_HDI}" stroke-width="2"/>'
+            )
+        # Mean dot.
+        parts.append(
+            f'<circle cx="{mean_x:.1f}" cy="{row_y:.1f}" r="5" '
+            f'fill="{color}" stroke="white" stroke-width="1"/>'
+        )
+        # Value label.
+        label_x = max(hdi_high_x, mean_x) + 8
+        parts.append(
+            f'<text x="{label_x:.1f}" y="{row_y + 4:.1f}" '
+            f'fill="{_INK}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="start">{_fmt_2(channel["roi_mean"])}</text>'
+        )
+
+    parts.append(
+        f'<text x="{left_pad + plot_width / 2:.1f}" y="{height - 8}" '
+        f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+        f'text-anchor="middle">Return per unit spend</text>'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def scenario_delta_svg(
+    periods: Sequence[str],
+    mean: Sequence[float],
+    hdi_low: Sequence[float],
+    hdi_high: Sequence[float],
+) -> str:
+    """Posterior predictive line + 95% HDI ribbon over the forecast periods.
+
+    All three series must be the same length as ``periods``.
+    """
+    n = len(periods)
+    if n == 0 or len(mean) != n or len(hdi_low) != n or len(hdi_high) != n:
+        return _empty_chart_svg("No forecast available.")
+
+    width = 720
+    height = 280
+    top_pad = 24
+    bottom_pad = 48
+    left_pad = 80
+    right_pad = 24
+
+    plot_width = width - left_pad - right_pad
+    plot_height = height - top_pad - bottom_pad
+
+    y_min = min(min(hdi_low), min(mean))
+    y_max = max(max(hdi_high), max(mean))
+    if y_max == y_min:
+        y_max = y_min + 1.0
+    y_pad = (y_max - y_min) * 0.05
+    y_min -= y_pad
+    y_max += y_pad
+
+    def x(i: int) -> float:
+        if n == 1:
+            return left_pad + plot_width / 2
+        return left_pad + (i / (n - 1)) * plot_width
+
+    def y(value: float) -> float:
+        return top_pad + (1.0 - (value - y_min) / (y_max - y_min)) * plot_height
+
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" aria-label="Predicted outcome over forecast periods" '
+        f'class="wmk-chart wmk-chart--scenario">'
+    )
+
+    # Y-axis grid + ticks (5 lines).
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        gy = top_pad + (1 - frac) * plot_height
+        gv = y_min + frac * (y_max - y_min)
+        parts.append(
+            f'<line x1="{left_pad}" y1="{gy:.1f}" '
+            f'x2="{left_pad + plot_width}" y2="{gy:.1f}" '
+            f'stroke="{_GRID}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{left_pad - 8}" y="{gy + 4:.1f}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="end">{_fmt_int(gv)}</text>'
+        )
+
+    # HDI ribbon as a closed polygon.
+    upper = " ".join(f"{x(i):.1f},{y(hdi_high[i]):.1f}" for i in range(n))
+    lower = " ".join(
+        f"{x(i):.1f},{y(hdi_low[i]):.1f}" for i in reversed(range(n))
+    )
+    parts.append(
+        f'<polygon points="{upper} {lower}" '
+        f'fill="{_PRIMARY_LIGHT}" fill-opacity="0.35" '
+        f'stroke="none"/>'
+    )
+
+    # Mean line.
+    line_points = " ".join(f"{x(i):.1f},{y(mean[i]):.1f}" for i in range(n))
+    parts.append(
+        f'<polyline points="{line_points}" '
+        f'fill="none" stroke="{_PRIMARY}" stroke-width="2" '
+        f'stroke-linejoin="round"/>'
+    )
+
+    # X-axis: first/last period labels and a midpoint when n > 2.
+    indices = [0, n - 1]
+    if n > 2:
+        indices.insert(1, n // 2)
+    seen = set()
+    for i in indices:
+        if i in seen:
+            continue
+        seen.add(i)
+        label_x = x(i)
+        parts.append(
+            f'<text x="{label_x:.1f}" y="{height - bottom_pad + 18}" '
+            f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+            f'text-anchor="middle">{escape(str(periods[i]))}</text>'
+        )
+
+    # Axis frame.
+    parts.append(
+        f'<line x1="{left_pad}" y1="{top_pad + plot_height}" '
+        f'x2="{left_pad + plot_width}" y2="{top_pad + plot_height}" '
+        f'stroke="{_MUTED}" stroke-width="1"/>'
+    )
+
+    # Y-axis label.
+    parts.append(
+        f'<text x="{left_pad}" y="{height - 12}" '
+        f'fill="{_MUTED}" font-family="{_FONT_FAMILY}" font-size="11" '
+        f'text-anchor="start">Period</text>'
+    )
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _empty_chart_svg(message: str) -> str:
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        'viewBox="0 0 720 80" role="img" '
+        f'aria-label="{escape(message)}" class="wmk-chart wmk-chart--empty">'
+        f'<text x="360" y="44" fill="{_MUTED}" '
+        f'font-family="{_FONT_FAMILY}" font-size="12" '
+        f'text-anchor="middle" font-style="italic">{escape(message)}</text>'
+        '</svg>'
+    )
+
+
+def _hatch_pattern_def(pattern_id: str, color: str) -> str:
+    """Diagonal hatch pattern used to mark spend-invariant channels."""
+    return (
+        f'<defs><pattern id="{pattern_id}" patternUnits="userSpaceOnUse" '
+        f'width="6" height="6" patternTransform="rotate(45)">'
+        f'<rect width="6" height="6" fill="{color}" fill-opacity="0.35"/>'
+        f'<line x1="0" y1="0" x2="0" y2="6" stroke="{color}" '
+        f'stroke-width="2"/></pattern></defs>'
+    )

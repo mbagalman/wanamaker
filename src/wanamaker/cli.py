@@ -1,10 +1,11 @@
 """``wanamaker`` CLI entry point.
 
-Six core commands per FR-6.3:
+Core commands per FR-6.3 plus the HTML showcase:
 
     wanamaker diagnose <data.csv>
     wanamaker fit --config <config.yaml>
     wanamaker report --run-id <run_id>
+    wanamaker showcase --run-id <run_id>
     wanamaker forecast --run-id <run_id> --plan <plan.csv>
     wanamaker compare-scenarios --run-id <run_id> --plans <p1.csv> <p2.csv> ...
     wanamaker recommend-ramp --run-id <run_id> --baseline <base.csv> --target <alt.csv>
@@ -21,7 +22,7 @@ delegates to the relevant subpackage.
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -225,7 +226,6 @@ def fit(
     from wanamaker.artifacts import (
         hash_config,
         hash_file,
-        list_runs,
         make_run_fingerprint,
         run_paths,
         serialize_summary,
@@ -233,7 +233,6 @@ def fit(
     )
     from wanamaker.config import load_config
     from wanamaker.data.io import load_input_csv
-    from wanamaker.diagnose.readiness import CheckSeverity, ReadinessLevel
     from wanamaker.engine.pymc import PyMCEngine
     from wanamaker.model.builder import build_model_spec
 
@@ -295,7 +294,7 @@ def fit(
     # ------------------------------------------------------------------
     # 6. Create run_id and artifact directory
     # ------------------------------------------------------------------
-    timestamp_utc = datetime.now(timezone.utc)
+    timestamp_utc = datetime.now(UTC)
     timestamp_str = timestamp_utc.strftime("%Y%m%dT%H%M%SZ")
     run_id = f"{fingerprint[:8]}_{timestamp_str}"
     paths = run_paths(cfg.run.artifact_dir, run_id)
@@ -441,6 +440,158 @@ def report(
     typer.echo(typer.style(f"Report saved: {output_path}", fg=typer.colors.GREEN))
 
 
+@app.command()
+def showcase(
+    run_id: str = typer.Option(..., "--run-id"),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Path to save the HTML showcase. Default: <run_dir>/showcase.html",
+    ),
+    title: str | None = typer.Option(
+        None,
+        "--title",
+        help="Override the showcase title. Default: 'Wanamaker MMM — <run_id short>'.",
+    ),
+    scenario: Path | None = typer.Option(
+        None,
+        "--scenario",
+        exists=True,
+        help=(
+            "Optional plan CSV. When provided, the showcase includes a "
+            "forecast section for that plan."
+        ),
+    ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help="Open the rendered showcase in the default browser when done.",
+    ),
+) -> None:
+    """Render a single self-contained HTML showcase of a completed run.
+
+    The showcase bundles the executive summary, channel contributions
+    (with credible intervals), ROI table, the Trust Card, and an optional
+    scenario forecast into one file with all CSS and SVG charts inlined.
+    """
+    import webbrowser
+    from datetime import datetime
+
+    from wanamaker import __version__
+    from wanamaker.artifacts import (
+        deserialize_refresh_diff,
+        deserialize_summary,
+        load_manifest,
+        run_paths,
+    )
+    from wanamaker.config import load_config
+    from wanamaker.reports import build_showcase_context, render_showcase
+    from wanamaker.trust_card.compute import build_trust_card
+
+    paths = run_paths(artifact_dir, run_id)
+    if not paths.config.exists():
+        typer.echo(
+            typer.style(
+                f"Error: run {run_id!r} not found in {artifact_dir / 'runs'}. "
+                "Run 'wanamaker fit' first or check --artifact-dir.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not paths.summary.exists():
+        typer.echo(
+            typer.style(
+                f"Error: summary.json missing for run {run_id!r} at {paths.summary}.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    summary = deserialize_summary(paths.summary.read_text())
+
+    refresh_diff = None
+    if paths.refresh_diff.exists():
+        refresh_diff = deserialize_refresh_diff(paths.refresh_diff.read_text())
+
+    cfg = load_config(paths.config)
+    lift_test_priors = _load_lift_priors_if_any(cfg)
+    spend_by_channel = _spend_by_channel_from_training_data(cfg)
+
+    trust_card = build_trust_card(
+        summary,
+        refresh_diff=refresh_diff,
+        lift_test_priors=lift_test_priors,
+    )
+
+    # Manifest gives us the engine label and fingerprint. The showcase
+    # falls back gracefully when manifest is absent (e.g. older runs).
+    runtime_mode = cfg.run.runtime_mode
+    run_fingerprint = ""
+    engine_label = ""
+    if paths.manifest.exists():
+        try:
+            manifest = load_manifest(paths.manifest.read_text())
+            run_fingerprint = str(manifest.get("run_fingerprint", ""))
+            engine = manifest.get("engine", {}) or {}
+            engine_label = (
+                f"{engine.get('name', '?')} {engine.get('version', '?')}"
+            )
+        except ValueError:
+            engine_label = ""
+    data_hash = (
+        paths.data_hash.read_text().strip() if paths.data_hash.exists() else ""
+    )
+
+    scenario_forecast = None
+    scenario_plan_name = None
+    if scenario is not None:
+        from wanamaker.forecast.posterior_predictive import forecast as run_forecast
+
+        plan_engine, _, _, _, run_seed = _load_run_for_forecast(
+            artifact_dir, run_id
+        )
+        typer.echo(f"Forecasting {scenario} for showcase…")
+        scenario_forecast = run_forecast(summary, scenario, run_seed, plan_engine)
+        scenario_plan_name = Path(scenario).stem
+
+    advisor_lines = _safe_advisor_recommendations(
+        summary, spend_by_channel=spend_by_channel,
+    )
+
+    context = build_showcase_context(
+        summary,
+        trust_card,
+        title=title or f"Wanamaker MMM — {run_id[:8]}",
+        run_id=run_id,
+        generated_at=datetime.now(UTC),
+        runtime_mode=runtime_mode,
+        package_version=__version__,
+        data_hash=data_hash,
+        run_fingerprint=run_fingerprint,
+        engine_label=engine_label or "(unknown)",
+        refresh_diff=refresh_diff,
+        scenario_forecast=scenario_forecast,
+        scenario_plan_name=scenario_plan_name,
+        advisor_recommendations=advisor_lines,
+    )
+
+    html = render_showcase(context)
+
+    output_path = output if output is not None else paths.root / "showcase.html"
+    output_path.write_text(html, encoding="utf-8")
+    typer.echo(typer.style(f"Showcase saved: {output_path}", fg=typer.colors.GREEN))
+
+    if open_browser:
+        webbrowser.open(output_path.resolve().as_uri())
+
+
 _RUN_EXAMPLES: tuple[str, ...] = ("public_benchmark",)
 
 
@@ -544,6 +695,20 @@ def run(
         typer.style("Step 3/3 · executive summary + Trust Card", fg=typer.colors.CYAN, bold=True)
     )
     report(run_id=run_id, artifact_dir=artifact_dir, output=None)
+    typer.echo("")
+
+    # Bonus: produce the HTML showcase too. The example flow is the
+    # canonical "show your CMO" demo moment; rendering it here means a
+    # single ``wanamaker run --example`` produces both the analyst-facing
+    # Markdown and the stakeholder-facing HTML in one go.
+    showcase(
+        run_id=run_id,
+        artifact_dir=artifact_dir,
+        output=None,
+        title=None,
+        scenario=None,
+        open_browser=False,
+    )
     typer.echo("")
 
     report_path = artifact_dir / "runs" / run_id / "report.md"
@@ -843,7 +1008,7 @@ def refresh(
         engine_version=engine_version,
         seed=cfg.run.seed,
     )
-    timestamp_utc = datetime.now(timezone.utc)
+    timestamp_utc = datetime.now(UTC)
     timestamp_str = timestamp_utc.strftime("%Y%m%dT%H%M%SZ")
     run_id = f"{fingerprint[:8]}_{timestamp_str}"
     paths = run_paths(cfg.run.artifact_dir, run_id)
@@ -1124,6 +1289,7 @@ def _get_pymc_version() -> str:
 def _write_posterior(posterior: object, path: object) -> None:
     """Write the posterior draws to a NetCDF file via ArviZ InferenceData."""
     from pathlib import Path as _Path
+
     from wanamaker.engine.base import Posterior
     from wanamaker.engine.pymc import PyMCRawPosterior
 

@@ -20,6 +20,7 @@ def test_help_lists_public_commands() -> None:
         "diagnose",
         "fit",
         "report",
+        "showcase",
         "run",
         "forecast",
         "compare-scenarios",
