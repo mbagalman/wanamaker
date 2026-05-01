@@ -7,6 +7,14 @@ The goal is to go from installation to a first Markdown report. The report is
 not a final business recommendation by itself. It is the starting point for
 reading channel estimates, uncertainty, and the Trust Card.
 
+## Browser version (no install)
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mbagalman/wanamaker/blob/master/notebooks/quickstart.ipynb)
+
+The [Colab notebook](https://github.com/mbagalman/wanamaker/blob/master/notebooks/quickstart.ipynb)
+runs the same flow end-to-end in a hosted Python kernel. It is the fastest way
+to evaluate Wanamaker without a local PyMC install.
+
 ## The 30-second version
 
 If you just want to see Wanamaker run end-to-end on the public example:
