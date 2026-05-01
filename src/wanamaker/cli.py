@@ -7,6 +7,7 @@ Core commands per FR-6.3 plus the HTML showcase:
     wanamaker report --run-id <run_id>
     wanamaker showcase --run-id <run_id>
     wanamaker trust-card --run-id <run_id>
+    wanamaker export --run-id <run_id> --format excel
     wanamaker forecast --run-id <run_id> --plan <plan.csv>
     wanamaker compare-scenarios --run-id <run_id> --plans <p1.csv> <p2.csv> ...
     wanamaker recommend-ramp --run-id <run_id> --baseline <base.csv> --target <alt.csv>
@@ -714,6 +715,165 @@ def trust_card(
         webbrowser.open(output_path.resolve().as_uri())
 
 
+@app.command()
+def export(
+    run_id: str = typer.Option(..., "--run-id"),
+    format: str = typer.Option(  # noqa: A002 — CLI flag name is "format"
+        "excel",
+        "--format",
+        help=(
+            "Export format. Currently 'excel' (.xlsx). PDF and PowerPoint "
+            "are not supported in this release; use the browser print path "
+            "from the showcase HTML for PDF."
+        ),
+    ),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Path to save the export. Default: <run_dir>/summary.xlsx.",
+    ),
+    scenario: list[Path] = typer.Option(
+        [],
+        "--scenario",
+        exists=True,
+        help=(
+            "Optional plan CSV to forecast and include as a row in the "
+            "Scenarios sheet. Pass multiple times to compare plans."
+        ),
+    ),
+) -> None:
+    """Export a run's structured tables to an analyst-friendly Excel workbook.
+
+    Sheets produced: Summary, Channels, Trust Card, Parameters, optional
+    Refresh diff, optional Scenarios. Values are stored as numbers (not
+    formatted strings) so analysts can pivot and compute on them
+    directly.
+    """
+    from datetime import datetime, timezone
+
+    from wanamaker import __version__
+    from wanamaker.artifacts import (
+        deserialize_refresh_diff,
+        deserialize_summary,
+        load_manifest,
+        run_paths,
+    )
+    from wanamaker.config import load_config
+    from wanamaker.reports import WorkbookMetadata, write_excel_workbook
+    from wanamaker.trust_card.compute import build_trust_card
+
+    if format != "excel":
+        typer.echo(
+            typer.style(
+                f"Error: --format {format!r} is not supported in this release. "
+                "Currently only 'excel' is implemented.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    paths = run_paths(artifact_dir, run_id)
+    if not paths.config.exists():
+        typer.echo(
+            typer.style(
+                f"Error: run {run_id!r} not found in {artifact_dir / 'runs'}. "
+                "Run 'wanamaker fit' first or check --artifact-dir.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not paths.summary.exists():
+        typer.echo(
+            typer.style(
+                f"Error: summary.json missing for run {run_id!r} at {paths.summary}.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    summary = deserialize_summary(paths.summary.read_text())
+
+    refresh_diff = None
+    if paths.refresh_diff.exists():
+        refresh_diff = deserialize_refresh_diff(paths.refresh_diff.read_text())
+
+    cfg = load_config(paths.config)
+    lift_test_priors = _load_lift_priors_if_any(cfg)
+    card = build_trust_card(
+        summary,
+        refresh_diff=refresh_diff,
+        lift_test_priors=lift_test_priors,
+    )
+
+    runtime_mode = cfg.run.runtime_mode
+    run_fingerprint = ""
+    engine_label = "(unknown)"
+    if paths.manifest.exists():
+        try:
+            manifest = load_manifest(paths.manifest.read_text())
+            run_fingerprint = str(manifest.get("run_fingerprint", ""))
+            engine = manifest.get("engine", {}) or {}
+            engine_label = (
+                f"{engine.get('name', '?')} {engine.get('version', '?')}"
+            )
+        except ValueError:
+            engine_label = "(unknown)"
+
+    if summary.in_sample_predictive and summary.in_sample_predictive.periods:
+        periods = summary.in_sample_predictive.periods
+        period_start, period_end = str(periods[0]), str(periods[-1])
+        n_periods = len(periods)
+    else:
+        period_start, period_end, n_periods = "unknown", "unknown", 0
+
+    metadata = WorkbookMetadata(
+        run_id=run_id,
+        period_start=period_start,
+        period_end=period_end,
+        n_periods=n_periods,
+        generated_at=datetime.now(timezone.utc),
+        package_version=__version__,
+        runtime_mode=runtime_mode,
+        engine_label=engine_label,
+        run_fingerprint=run_fingerprint,
+    )
+
+    scenario_forecasts: list[Any] = []
+    scenario_plan_names: list[str] = []
+    if scenario:
+        from wanamaker.forecast.posterior_predictive import forecast as run_forecast
+
+        plan_engine, _, _, _, run_seed = _load_run_for_forecast(
+            artifact_dir, run_id
+        )
+        for plan_path in scenario:
+            typer.echo(f"Forecasting {plan_path} for export…")
+            scenario_forecasts.append(
+                run_forecast(summary, plan_path, run_seed, plan_engine)
+            )
+            scenario_plan_names.append(Path(plan_path).stem)
+
+    output_path = output if output is not None else paths.root / "summary.xlsx"
+    write_excel_workbook(
+        summary,
+        card,
+        output=output_path,
+        metadata=metadata,
+        refresh_diff=refresh_diff,
+        scenarios=scenario_forecasts or None,
+        scenario_plan_names=scenario_plan_names or None,
+    )
+    typer.echo(typer.style(f"Workbook saved: {output_path}", fg=typer.colors.GREEN))
+
+
 _RUN_EXAMPLES: tuple[str, ...] = ("public_benchmark",)
 
 
@@ -837,6 +997,13 @@ def run(
         output=None,
         title=None,
         open_browser=False,
+    )
+    export(
+        run_id=run_id,
+        format="excel",
+        artifact_dir=artifact_dir,
+        output=None,
+        scenario=[],
     )
     typer.echo("")
 
