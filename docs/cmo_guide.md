@@ -292,7 +292,10 @@ Useful artifacts include:
 | `summary.json` | Stores the engine-neutral posterior summary used by reports. |
 | `trust_card.json` | Stores the credibility audit. |
 | `refresh_diff.json` | Stores the movement explanation for a refresh run. |
-| `report.md` | The stakeholder-facing report. |
+| `report.md` | Markdown executive summary + Trust Card — analyst-facing review. |
+| `showcase.html` | Single-file HTML with charts, response curves, and the Trust Card — the "show your CMO" artifact. |
+| `trust_card.html` | One-page plain-English Trust Card — forward when "do I trust this MMM?" comes up. |
+| `summary.xlsx` | Structured tables (channels, ROI, parameters, scenarios) for analysts who want to pivot. |
 
 These artifacts make it possible to answer "what did we know when we made this
 decision?"

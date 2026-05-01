@@ -145,29 +145,71 @@ The run directory contains files such as:
 | `timestamp.txt` | Fit timestamp |
 | `engine.txt` | Engine name and version |
 
-## Step 3: Render The Report
+## Step 3: Render The Reports
 
-Use the run ID from the fit command:
+Use the run ID from the fit command. Wanamaker can produce four output formats
+from one fitted run; pick the ones that match your audience.
+
+### Markdown report — analyst-facing
 
 ```bash
 wanamaker report --run-id <run_id>
 ```
 
-By default, this writes:
-
-```text
-.wanamaker/runs/<run_id>/report.md
-```
-
-The report includes:
-
-- an executive summary
-- channel contribution and ROI language
-- uncertainty-aware wording
-- the Model Trust Card
+Writes `.wanamaker/runs/<run_id>/report.md`. Includes the executive summary,
+channel contribution and ROI language, uncertainty-aware wording, and the Model
+Trust Card. Best for git-tracked review and pasting into Slack.
 
 The executive summary is deterministic template output. Wanamaker does not use
 LLM calls to generate product reports.
+
+### HTML showcase — stakeholder-facing
+
+```bash
+wanamaker showcase --run-id <run_id>
+```
+
+Writes `.wanamaker/runs/<run_id>/showcase.html`: a single self-contained HTML
+file with all CSS and SVG charts inlined. No JS, no CDN, no external assets, so
+it renders identically in browsers, email previews, and print. Includes a
+contribution waterfall, channel bars with credible-interval whiskers, ROI dot
+plot, per-channel response (saturation) curves, and the Trust Card panel.
+
+For side-by-side scenario comparison, pass plan CSVs:
+
+```bash
+wanamaker showcase --run-id <run_id> \
+    --scenario base.csv --scenario alt.csv
+```
+
+The first plan is treated as the baseline for the comparison table's delta
+column.
+
+### Trust Card one-pager — executive-facing
+
+```bash
+wanamaker trust-card --run-id <run_id>
+```
+
+Writes `.wanamaker/runs/<run_id>/trust_card.html`: a single-page artifact
+designed for forwarding to non-technical executives. Plain-English translations
+of every Trust Card dimension (no jargon — no "credible interval", "R-hat",
+"MCMC"), a verdict pill, and a short "what this means for decisions" block.
+Prints to one page on US Letter or A4.
+
+### Excel workbook — analyst slicing
+
+```bash
+wanamaker export --run-id <run_id> --format excel
+```
+
+Writes `.wanamaker/runs/<run_id>/summary.xlsx`. Sheets: Summary, Channels,
+Trust Card, Parameters, optional Refresh diff, optional Scenarios. Numbers are
+stored as numbers (not formatted strings) so analysts can pivot and compute on
+them directly.
+
+> **Tip:** `wanamaker run --example public_benchmark` runs the diagnostic, fit,
+> and *all four* report formats in one command. Use it as the canonical demo.
 
 ## Step 4: Read The Trust Card
 
