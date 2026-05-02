@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -17,7 +18,8 @@ from wanamaker.config import (
 )
 from wanamaker.data.io import load_lift_test_csv
 from wanamaker.engine.pymc import _coefficient_prior
-from wanamaker.model.builder import build_model_spec
+from wanamaker.model.builder import build_model_spec, pool_lift_priors
+from wanamaker.model.spec import LiftPrior
 
 
 def _write_lift_csv(tmp_path: Path, content: str) -> Path:
@@ -80,7 +82,10 @@ def test_load_lift_test_csv_requires_all_columns(tmp_path: Path) -> None:
         load_lift_test_csv(path)
 
 
-def test_load_lift_test_csv_rejects_duplicate_channel_rows(tmp_path: Path) -> None:
+def test_load_lift_test_csv_allows_multiple_rows_per_channel(tmp_path: Path) -> None:
+    """Multiple rows for the same channel are now allowed (#78). They're
+    pooled in ``model.builder._load_lift_test_priors``; the loader just
+    preserves them."""
     path = _write_lift_csv(
         tmp_path,
         "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
@@ -88,8 +93,46 @@ def test_load_lift_test_csv_rejects_duplicate_channel_rows(tmp_path: Path) -> No
         "search,2024-02-01,2024-02-14,2.2,1.4,3.0\n",
     )
 
-    with pytest.raises(ValueError, match="duplicate channel"):
-        load_lift_test_csv(path)
+    df = load_lift_test_csv(path)
+    assert len(df) == 2
+    assert (df["channel"] == "search").all()
+
+
+def test_load_lift_test_csv_warns_on_overlapping_test_windows(tmp_path: Path) -> None:
+    """Two tests for the same channel with overlapping date windows
+    violate the independence assumption the pooling formula relies on
+    (#78). The loader still returns the rows; it just warns."""
+    path = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+        "search,2024-01-01,2024-01-31,2.0,1.2,2.8\n"
+        # Overlaps with the first row (2024-01-01..31).
+        "search,2024-01-15,2024-02-14,2.2,1.4,3.0\n",
+    )
+
+    with pytest.warns(UserWarning, match="overlapping test windows"):
+        df = load_lift_test_csv(path)
+
+    assert len(df) == 2
+
+
+def test_load_lift_test_csv_does_not_warn_on_disjoint_windows(tmp_path: Path) -> None:
+    """Two tests for the same channel with disjoint date windows are the
+    intended use case for pooling and should not warn."""
+    import warnings as _warnings
+
+    path = _write_lift_csv(
+        tmp_path,
+        "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+        "search,2024-01-01,2024-01-14,2.0,1.2,2.8\n"
+        "search,2024-02-01,2024-02-14,2.2,1.4,3.0\n",
+    )
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")
+        df = load_lift_test_csv(path)
+
+    assert len(df) == 2
 
 
 def test_load_lift_test_csv_rejects_invalid_interval(tmp_path: Path) -> None:
@@ -333,3 +376,145 @@ def test_pymc_coefficient_prior_uses_default_without_lift_prior() -> None:
     assert fake_pm.calls == [
         ("HalfNormal", "channel__tv__coefficient", {"sigma": 10.0})
     ]
+
+
+# ---------------------------------------------------------------------------
+# Multi-test-per-channel pooling (#78)
+# ---------------------------------------------------------------------------
+
+
+class TestPoolLiftPriors:
+    """Worked-example tests for the precision-weighted pooling formula."""
+
+    def test_single_prior_passes_through_with_n_tests_one(self) -> None:
+        """A single-element pool should be the input itself, with
+        ``n_tests=1`` made explicit even if the input had a default."""
+        original = LiftPrior(mean_roi=2.0, sd_roi=0.5)
+        pooled = pool_lift_priors([original])
+        assert pooled.mean_roi == pytest.approx(2.0)
+        assert pooled.sd_roi == pytest.approx(0.5)
+        assert pooled.n_tests == 1
+
+    def test_two_equal_precision_priors_average_means_and_shrink_sd(self) -> None:
+        """Equal precisions → average mean; pooled sd = σ / √2."""
+        priors = [
+            LiftPrior(mean_roi=1.0, sd_roi=0.5),
+            LiftPrior(mean_roi=3.0, sd_roi=0.5),
+        ]
+        pooled = pool_lift_priors(priors)
+        assert pooled.mean_roi == pytest.approx(2.0)
+        # σ_pooled = √(1 / (1/0.25 + 1/0.25)) = √(1/8) = 0.3536...
+        assert pooled.sd_roi == pytest.approx(0.5 / math.sqrt(2))
+        assert pooled.n_tests == 2
+
+    def test_unequal_precision_pulls_toward_tighter_estimate(self) -> None:
+        """A tight test should dominate a wide test in the pooled mean."""
+        # σ1 = 0.1, σ2 = 1.0 → precisions 100, 1.
+        # μ_pooled = (1.0*100 + 3.0*1) / 101 ≈ 1.0198
+        priors = [
+            LiftPrior(mean_roi=1.0, sd_roi=0.1),
+            LiftPrior(mean_roi=3.0, sd_roi=1.0),
+        ]
+        pooled = pool_lift_priors(priors)
+        assert pooled.mean_roi == pytest.approx(1.0198, abs=1e-3)
+        # σ_pooled = √(1/101) ≈ 0.0995
+        assert pooled.sd_roi == pytest.approx(math.sqrt(1.0 / 101.0), rel=1e-6)
+        # And the pooled sd is below even the tighter input — that is the
+        # whole point of pooling additional information.
+        assert pooled.sd_roi < 0.1
+
+    def test_pooled_n_tests_sums_inputs(self) -> None:
+        """Pooling already-pooled priors keeps ``n_tests`` cumulative."""
+        a = pool_lift_priors([
+            LiftPrior(mean_roi=2.0, sd_roi=0.5),
+            LiftPrior(mean_roi=2.5, sd_roi=0.5),
+        ])
+        b = LiftPrior(mean_roi=1.5, sd_roi=0.3)
+        combined = pool_lift_priors([a, b])
+        assert a.n_tests == 2
+        assert combined.n_tests == 3
+
+    def test_pool_with_empty_list_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            pool_lift_priors([])
+
+
+class TestMultipleLiftTestsPerChannel:
+    """End-to-end tests through ``build_model_spec``."""
+
+    def test_pooled_prior_is_tighter_than_single_test_prior(self, tmp_path: Path) -> None:
+        # Write two distinct CSVs side by side; helper overwrites a single
+        # path so we use sub-directories to keep them apart.
+        single_dir = tmp_path / "single"
+        single_dir.mkdir()
+        double_dir = tmp_path / "double"
+        double_dir.mkdir()
+        single = _write_lift_csv(
+            single_dir,
+            "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+            "search,2024-01-01,2024-01-14,2.0,1.6,2.4\n",
+        )
+        double = _write_lift_csv(
+            double_dir,
+            "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+            "search,2024-01-01,2024-01-14,2.0,1.6,2.4\n"
+            "search,2024-02-01,2024-02-14,2.0,1.6,2.4\n",
+        )
+
+        single_spec = build_model_spec(_config(tmp_path, single))
+        double_spec = build_model_spec(_config(tmp_path, double))
+
+        single_prior = single_spec.lift_test_priors["search"]
+        double_prior = double_spec.lift_test_priors["search"]
+
+        # Same point estimate.
+        assert single_prior.mean_roi == pytest.approx(double_prior.mean_roi)
+        # Pooled sd is √2 times tighter (two equal-precision tests).
+        assert double_prior.sd_roi == pytest.approx(
+            single_prior.sd_roi / math.sqrt(2), rel=1e-6,
+        )
+        # n_tests reflects both rows.
+        assert single_prior.n_tests == 1
+        assert double_prior.n_tests == 2
+
+    def test_unknown_channel_still_fails(self, tmp_path: Path) -> None:
+        """Multi-row support doesn't relax the unknown-channel check."""
+        path = _write_lift_csv(
+            tmp_path,
+            "channel,test_start,test_end,roi_estimate,roi_ci_lower,roi_ci_upper\n"
+            "ghost,2024-01-01,2024-01-14,2.0,1.6,2.4\n"
+            "ghost,2024-02-01,2024-02-14,2.0,1.6,2.4\n",
+        )
+        with pytest.raises(ValueError, match="not configured"):
+            build_model_spec(_config(tmp_path, path))
+
+
+class TestTrustCardReportsPooledTestCount:
+    """The Trust Card calibration message should report the total number
+    of underlying lift-test rows, not the number of channels."""
+
+    def test_message_counts_tests_not_channels(self) -> None:
+        from wanamaker.engine.summary import ChannelContributionSummary
+        from wanamaker.trust_card.compute import lift_test_consistency_dimension
+
+        contributions = [
+            ChannelContributionSummary(
+                channel="search",
+                mean_contribution=100.0,
+                hdi_low=80.0,
+                hdi_high=120.0,
+                roi_mean=2.0,
+                roi_hdi_low=1.6,
+                roi_hdi_high=2.4,
+                observed_spend_min=10.0,
+                observed_spend_max=50.0,
+            ),
+        ]
+        # One channel, but the underlying prior pooled three rows.
+        priors = {
+            "search": LiftPrior(mean_roi=2.0, sd_roi=0.2, n_tests=3),
+        }
+
+        result = lift_test_consistency_dimension(contributions, priors)
+        # Must say "3 lift tests", not "1 lift test".
+        assert "3 lift tests" in result.explanation

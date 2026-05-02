@@ -79,23 +79,30 @@ def load_lift_test_csv(path: Path) -> pd.DataFrame:
       ci_lower, ci_upper
 
     The returned frame converts any schema into the canonical ROI columns,
-    parses test dates, converts numeric fields to floats, and rejects
-    ambiguous duplicate channel rows or mixed schemas. Conversion from
-    confidence intervals to ``LiftPrior`` objects is handled by
-    ``wanamaker.model.builder``.
+    parses test dates, and converts numeric fields to floats. Conversion
+    from confidence intervals to ``LiftPrior`` objects (including
+    precision-weighted pooling when a channel has multiple tests) is
+    handled by ``wanamaker.model.builder``.
+
+    Multiple rows per channel are allowed and pooled downstream as
+    independent ROI estimates (#78). When two rows for the same channel
+    have overlapping ``[test_start, test_end]`` windows, a
+    ``UserWarning`` fires because the independence assumption the
+    pooling formula relies on is violated — the user should either
+    combine the tests externally or supply a wider interval.
 
     Args:
         path: Path to the lift-test CSV.
 
     Returns:
-        Validated lift-test results, one row per channel, with canonical
-        ROI columns (roi_estimate, roi_ci_lower, roi_ci_upper).
+        Validated lift-test results with canonical ROI columns
+        (``roi_estimate``, ``roi_ci_lower``, ``roi_ci_upper``).
+        Multiple rows per channel are preserved.
 
     Raises:
         FileNotFoundError: If ``path`` does not exist.
         ValueError: If required columns are missing, mixed schemas are used,
-            dates/numbers cannot be parsed, intervals are invalid, or a
-            channel appears more than once.
+            dates/numbers cannot be parsed, or intervals are invalid.
     """
     df = pd.read_csv(path)
     columns = set(df.columns)
@@ -160,12 +167,6 @@ def load_lift_test_csv(path: Path) -> pd.DataFrame:
     if bool((out["channel"] == "").any()):
         raise ValueError(f"lift-test CSV {path} contains blank channel names")
 
-    duplicates = sorted(out.loc[out["channel"].duplicated(), "channel"].unique())
-    if duplicates:
-        raise ValueError(
-            f"lift-test CSV {path} contains duplicate channel rows: {duplicates}"
-        )
-
     for column in ("test_start", "test_end"):
         out[column] = pd.to_datetime(out[column], errors="raise")
 
@@ -186,4 +187,39 @@ def load_lift_test_csv(path: Path) -> pd.DataFrame:
             f"lift-test CSV {path} has roi_ci_upper <= roi_ci_lower for channels: {channels}"
         )
 
+    overlapping = _channels_with_overlapping_test_windows(out)
+    if overlapping:
+        warnings.warn(
+            f"lift-test CSV {path} has overlapping test windows for channels: "
+            f"{sorted(overlapping)}. The pooling formula assumes the rows are "
+            "independent; overlapping market/time/audience violates that. "
+            "Combine these tests externally or supply a wider interval.",
+            UserWarning,
+            stacklevel=2,
+        )
+
     return out
+
+
+def _channels_with_overlapping_test_windows(df: pd.DataFrame) -> set[str]:
+    """Return channels whose multiple test rows have overlapping date windows.
+
+    Independence-violating overlap is the case the pooling formula in
+    ``wanamaker.model.builder`` cannot recover from cleanly. Two
+    closed intervals ``[a1, a2]`` and ``[b1, b2]`` overlap iff
+    ``a1 <= b2 and b1 <= a2``.
+    """
+    overlapping: set[str] = set()
+    for channel, group in df.groupby("channel"):
+        if len(group) < 2:
+            continue
+        starts = group["test_start"].tolist()
+        ends = group["test_end"].tolist()
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                if starts[i] <= ends[j] and starts[j] <= ends[i]:
+                    overlapping.add(str(channel))
+                    break
+            if channel in overlapping:
+                break
+    return overlapping

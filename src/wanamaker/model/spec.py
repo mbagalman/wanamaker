@@ -102,11 +102,17 @@ class LiftPrior:
         confidence: Nominal confidence level of the lift test interval
             (e.g. 0.95).  Stored for auditing; not used in the prior
             directly (the sd already encodes the uncertainty).
+        n_tests: Number of underlying lift-test rows that contributed to
+            this prior. ``1`` for a single-test prior. When multiple
+            tests for the same channel are pooled (#78), this records
+            how many rows the precision-weighted pool consumed so the
+            Trust Card calibration message can report the right total.
     """
 
     mean_roi: float
     sd_roi: float
     confidence: float = 0.95
+    n_tests: int = 1
 
     def __post_init__(self) -> None:
         """Validate lift-prior uncertainty."""
@@ -114,6 +120,8 @@ class LiftPrior:
             raise ValueError(f"sd_roi must be strictly positive; got {self.sd_roi!r}")
         if not 0.0 < self.confidence < 1.0:
             raise ValueError(f"confidence must be in (0, 1); got {self.confidence!r}")
+        if self.n_tests < 1:
+            raise ValueError(f"n_tests must be >= 1; got {self.n_tests!r}")
 
 
 # ---------------------------------------------------------------------------

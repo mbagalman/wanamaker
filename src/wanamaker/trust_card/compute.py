@@ -328,7 +328,12 @@ def lift_test_consistency_dimension(
         else:
             consistent.append(channel)
 
-    num_tests = len(lift_test_priors)
+    # ``n_tests`` is the number of underlying lift-test rows that
+    # contributed to each prior — typically 1, but >1 when multiple
+    # tests for the same channel were pooled (#78). Summing across
+    # priors gives the right total for the "Calibrated with N lift tests"
+    # message regardless of how many channels were calibrated.
+    num_tests = sum(prior.n_tests for prior in lift_test_priors.values())
     coverage_str = ""
     if total_spend and total_spend > 0:
         coverage_pct = calibrated_spend / total_spend
