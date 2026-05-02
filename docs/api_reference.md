@@ -146,6 +146,29 @@ wanamaker compare-scenarios --run-id <run_id> --plans path/to/base.csv --plans p
 | `--seed` | integer | run seed | Override posterior-predictive sampling seed. |
 | `--output` | path | `<run_dir>/scenario_comparison.md` | Markdown scenario report path. |
 
+### `wanamaker suggest-scenarios`
+
+Generate up to `top_n` bounded candidate budget plans from a baseline plan and rank them with uncertainty. The model evaluates the candidates it generated; it does not perform constrained optimization. Every candidate is gated through the explicit `scenario_generation` constraint contract before being forecast, and the surviving plans are ranked against the supplied baseline.
+
+Candidate CSVs are written to `<run_dir>/candidates/` and can be passed directly into `compare-scenarios` for further drill-down. The Markdown summary at `<run_dir>/scenario_suggestions.md` always includes a "Constraints used" section so the audit context is visible alongside the ranking.
+
+```bash
+wanamaker suggest-scenarios --run-id <run_id> --baseline path/to/base.csv
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--run-id` | string | required | Existing fitted run ID. |
+| `--baseline` | path | required | Baseline future spend plan CSV. |
+| `--artifact-dir` | path | `.wanamaker` | Root artifact directory. |
+| `--top-n` | integer | config value | Override `scenario_generation.top_n`. |
+| `--max-channel-change` | float | config value | Override `scenario_generation.max_channel_change`. |
+| `--budget-mode` | `hold_total`, `allow_increase`, `allow_decrease`, `allow_change` | config value | Override `scenario_generation.budget_mode`. |
+| `--output-dir` | path | `<run_dir>/candidates/` | Directory for candidate CSVs. |
+| `--seed` | integer | run seed | Override posterior-predictive sampling seed. |
+
+The command exits non-zero when no candidate plans could be produced — for example when every channel is locked, excluded, spend-invariant, or has a zero baseline. The saved Markdown still records why so the failure is auditable.
+
 ### `wanamaker recommend-ramp`
 
 Recommend a risk-adjusted staged move from a baseline plan toward a target plan.

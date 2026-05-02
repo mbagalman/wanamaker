@@ -19,6 +19,12 @@ from wanamaker.forecast.constraints import (
     resolve_scenario_generation_constraints,
     validate_candidate_spend,
 )
+from wanamaker.forecast.generator import (
+    CandidatePlan,
+    CandidateRejection,
+    CandidateScenarioSet,
+    suggest_scenarios,
+)
 from wanamaker.forecast.posterior_predictive import (
     ExtrapolationFlag,
     ForecastResult,
@@ -27,6 +33,9 @@ from wanamaker.forecast.posterior_predictive import (
 )
 
 __all__ = [
+    "CandidatePlan",
+    "CandidateRejection",
+    "CandidateScenarioSet",
     "ExtrapolationFlag",
     "ForecastResult",
     "PosteriorPredictiveEngine",
@@ -34,5 +43,6 @@ __all__ = [
     "format_constraints_markdown",
     "forecast",
     "resolve_scenario_generation_constraints",
+    "suggest_scenarios",
     "validate_candidate_spend",
 ]
