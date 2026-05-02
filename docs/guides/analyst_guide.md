@@ -235,7 +235,7 @@ A few practical notes:
   material loss, lower-tail (CVaR) risk, extrapolation severity, the Trust
   Card, a fractional-Kelly sizing cap, and an up-front block on
   reallocations involving spend-invariant channels (FR-3.2). The math lives
-  in [`docs/risk_adjusted_allocation.md`](risk_adjusted_allocation.md).
+  in [`docs/internal/risk_adjusted_allocation.md`](../internal/risk_adjusted_allocation.md).
 - v1 caps the Kelly multiplier at 0.5 even with a clean Trust Card, so
   `proceed` at `f = 100%` is uncommon and `stage` at `f = 50%` is the
   normal "everything looks good" outcome. That is intentional: the v1

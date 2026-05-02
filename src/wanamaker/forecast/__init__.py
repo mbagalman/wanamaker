@@ -31,6 +31,10 @@ from wanamaker.forecast.posterior_predictive import (
     PosteriorPredictiveEngine,
     forecast,
 )
+from wanamaker.forecast.scenarios import (
+    ScenarioComparisonResult,
+    compare_scenarios,
+)
 
 __all__ = [
     "CandidatePlan",
@@ -39,7 +43,9 @@ __all__ = [
     "ExtrapolationFlag",
     "ForecastResult",
     "PosteriorPredictiveEngine",
+    "ScenarioComparisonResult",
     "ScenarioGenerationConstraints",
+    "compare_scenarios",
     "format_constraints_markdown",
     "forecast",
     "resolve_scenario_generation_constraints",

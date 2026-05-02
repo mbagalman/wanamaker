@@ -132,6 +132,75 @@ def suggest_scenarios(
         ranking, the audit trail of rejections, and the blocked-channel
         map. ``candidates`` is empty when no eligible donor/recipient
         pair exists or when every attempt failed the safety gate.
+
+    Examples:
+        Generate one bounded candidate from a 50/50 baseline by donating
+        from the lowest-ROI channel (``display``, ROI 0.5) to the
+        highest-ROI channel (``paid_search``, ROI 4.0). The constraint
+        contract caps any single channel's relative change at 10%, so the
+        candidate moves exactly ``100 × 0.10 = 10`` from donor to
+        recipient.
+
+        >>> import pandas as pd
+        >>> from wanamaker.engine.summary import (
+        ...     ChannelContributionSummary, PosteriorSummary, PredictiveSummary,
+        ... )
+        >>> from wanamaker.forecast import (
+        ...     ScenarioGenerationConstraints, suggest_scenarios,
+        ... )
+        >>>
+        >>> summary = PosteriorSummary(
+        ...     channel_contributions=[
+        ...         ChannelContributionSummary(
+        ...             channel="paid_search", mean_contribution=0.0,
+        ...             hdi_low=0.0, hdi_high=0.0, roi_mean=4.0,
+        ...             observed_spend_min=0.0, observed_spend_max=200.0,
+        ...         ),
+        ...         ChannelContributionSummary(
+        ...             channel="display", mean_contribution=0.0,
+        ...             hdi_low=0.0, hdi_high=0.0, roi_mean=0.5,
+        ...             observed_spend_min=0.0, observed_spend_max=200.0,
+        ...         ),
+        ...     ]
+        ... )
+        >>>
+        >>> baseline = pd.DataFrame({
+        ...     "period": ["2026-01"],
+        ...     "paid_search": [100.0],
+        ...     "display":     [100.0],
+        ... })
+        >>> constraints = ScenarioGenerationConstraints(
+        ...     budget_mode="hold_total", top_n=1,
+        ...     max_channel_change=0.10, max_total_moved_budget=0.20,
+        ...     locked_channels=(), excluded_channels=(),
+        ...     min_spend=(), max_spend=(),
+        ...     require_historical_support=False,
+        ... )
+        >>>
+        >>> class StubEngine:
+        ...     def posterior_predictive(self, summary, new_data, seed):
+        ...         m = (
+        ...             new_data["paid_search"].astype(float) * 4.0
+        ...             + new_data["display"].astype(float) * 0.5
+        ...         ).tolist()
+        ...         return PredictiveSummary(
+        ...             periods=new_data["period"].astype(str).tolist(),
+        ...             mean=m, hdi_low=m, hdi_high=m, draws=[m, m],
+        ...         )
+        >>>
+        >>> result = suggest_scenarios(
+        ...     summary, baseline, constraints, seed=0, engine=StubEngine(),
+        ... )
+        >>> [c.label for c in result.candidates]
+        ['candidate_1_display_to_paid_search']
+        >>> only = result.candidates[0]
+        >>> only.donor_channel, only.recipient_channel, only.moved_amount
+        ('display', 'paid_search', 10.0)
+        >>> result.blocked_channels       # nothing locked / invariant / zero
+        {}
+        >>> # Ranking always includes the baseline plus every surviving candidate.
+        >>> [(r.plan_name, r.is_baseline) for r in result.rankings]
+        [('candidate_1_display_to_paid_search', False), ('baseline', True)]
     """
     required_channels = [c.channel for c in posterior_summary.channel_contributions]
     baseline_plan = load_plan(baseline, required_channels)

@@ -31,25 +31,27 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
+  - Guides:
+      - Analyst's Guide: guides/analyst_guide.md
+      - What Wanamaker Tells Your CMO: guides/cmo_guide.md
+      - Privacy and Data Handling: guides/privacy.md
+      - Comparison to Other Tools: guides/comparison.md
   - Worked Examples:
       - Overview: examples/index.md
       - DTC reallocates TV to CTV: examples/tv_to_ctv.md
       - B2B refresh after a noisy quarter: examples/refresh_after_noisy_quarter.md
       - A lift test changes the verdict: examples/lift_test_changes_verdict.md
-  - Analyst's Guide: analyst_guide.md
-  - What Wanamaker Tells Your CMO: cmo_guide.md
-  - Privacy and Data Handling: privacy.md
-  - Comparison to Other Tools: comparison.md
   - API Reference: api_reference.md
-  - Architecture:
-      - Technical Architecture: architecture.md
-      - BRD/PRD: wanamaker_brd_prd.md
-      - Feedback: feedback.md
-      - Risk-Adjusted Allocation Ramps: risk_adjusted_allocation.md
+  - Verification Guide: verification.md
+  - Project Internals:
+      - Technical Architecture: internal/architecture.md
+      - BRD/PRD: internal/wanamaker_brd_prd.md
+      - Risk-Adjusted Allocation Ramps: internal/risk_adjusted_allocation.md
   - Decisions:
       - Bayesian Engine Selection: decisions/0001-bayesian-engine-selection.md
   - References:
       - Adstock and Saturation: references/adstock_and_saturation.md
+      - Risk-Adjusted Allocation Math: references/risk_adjusted_allocation_math.md
 
 markdown_extensions:
   - admonition

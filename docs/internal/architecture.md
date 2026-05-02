@@ -1,7 +1,7 @@
 # Wanamaker -- Architecture and Technical Specification
 
 **Audience:** Developers and AI coding assistants working on the codebase.
-**Companion documents:** [`docs/wanamaker_brd_prd.md`](wanamaker_brd_prd.md) (what and why), [`AGENTS.md`](https://github.com/mbagalman/wanamaker/blob/main/AGENTS.md) (hard rules and coding conventions).
+**Companion documents:** [`docs/internal/wanamaker_brd_prd.md`](wanamaker_brd_prd.md) (what and why), [`AGENTS.md`](https://github.com/mbagalman/wanamaker/blob/main/AGENTS.md) (hard rules and coding conventions).
 **Status:** Active pre-1.0 development. PyMC backend, transforms, model spec,
 config, artifacts, diagnose, refresh diff, forecasting, scenario comparison,
 risk-adjusted ramp recommendations, Trust Card, reports, and the public CLI
@@ -252,7 +252,7 @@ These modules own the **canonical mathematical formulas** for adstock and satura
 
 **Hill saturation:** `f(x) = x^slope / (x^slope + ec50^slope)`. EC50 = spend at half-maximum response. Reference: Jin et al. (2017) sec. 4.
 
-Before implementing or modifying any transform, read [`docs/references/adstock_and_saturation.md`](references/adstock_and_saturation.md).
+Before implementing or modifying any transform, read [`docs/references/adstock_and_saturation.md`](../references/adstock_and_saturation.md).
 
 ### 3.9 `model/` -- Engine-Agnostic Model Specification
 

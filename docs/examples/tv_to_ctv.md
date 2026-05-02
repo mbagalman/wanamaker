@@ -137,7 +137,7 @@ side by side before booking the change in your media plan.
 
 ## Next reading
 
-- [Risk-Adjusted Allocation Ramps](../risk_adjusted_allocation.md) —
+- [Risk-Adjusted Allocation Ramps](../internal/risk_adjusted_allocation.md) —
   the design rationale for the four-status verdict
 - [Refresh after a noisy quarter](refresh_after_noisy_quarter.md) —
   the next workflow you'll need

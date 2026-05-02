@@ -84,9 +84,9 @@ ignore = []
 "tests/**" = ["B011"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src/wanamaker"]
 python_files = ["test_*.py"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers --doctest-modules"
 markers = [
     "benchmark: benchmark-driven acceptance tests (slow)",
     "integration: end-to-end integration tests",

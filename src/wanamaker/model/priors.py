@@ -22,6 +22,14 @@ observed median spend per period when a model is configured.  It is
 
 **Half-life sigma convention**
 
+The σ values are calibrated so the implied 90 % log-normal prior range
+brackets the empirical half-life ranges in
+``docs/references/adstock_and_saturation.md`` § 4.1 (which collates Jin
+et al. 2017, Robyn's Analyst's Guide, and Broadbent 1979). They are
+*weakly informative* in the Gelman et al. (2008) sense: tight enough to
+constrain to the right order of magnitude, loose enough to let the
+likelihood dominate when the data has signal.
+
 - Channels with short, predictable carryover (paid search, affiliate,
   email, promotions): sigma = 0.35 (tighter, widely agreed range).
 - Mid-range channels: sigma = 0.40 (standard weakly-informative).
@@ -29,21 +37,34 @@ observed median spend per period when a model is configured.  It is
   (slightly wider to acknowledge greater real-world variability).
 
 At sigma = 0.40 and median = 1 week the 90 % prior range is [0.51, 1.96]
-weeks; at median = 6 weeks it is [3.07, 11.7] weeks.
+weeks; at median = 6 weeks it is [3.07, 11.7] weeks. These ranges were
+chosen against the per-category tables in
+``docs/references/adstock_and_saturation.md`` § 4.1 (e.g. paid search
+"0.5–1 week", linear TV "4–8 weeks") so 90 % of prior mass falls inside
+the published bracket.
 
 **Hill alpha sigma convention**
 
 All categories share sigma = 0.50 on the log scale, giving a 90 %
 prior range of approximately [0.66, 3.4] around median 1.5, which
-spans the canonical [0.5, 3.0] range from Jin et al. (2017).
+spans the canonical [0.5, 3.0] range from Jin et al. (2017) § 3.2.
 
 **Sources**
 
-- Jin et al. (Google, 2017), *Bayesian Methods for Media Mix Modeling with
-  Carryover and Shape Effects*, sec. 3 — foundational paper; canonical
-  parameter ranges for carryover and saturation.
-- Robyn (Meta) Analyst's Guide to MMM — practical guidance on half-life
-  ranges by channel type; ``https://facebookexperimental.github.io/Robyn/``.
+- Jin, Y., Wang, Y., Sun, Y., Chan, D., & Koehler, J. (2017). *Bayesian
+  Methods for Media Mix Modeling with Carryover and Shape Effects*.
+  Google Research. Sec. 3 — canonical parameter ranges for carryover
+  and saturation. https://research.google/pubs/pub46001/
+- Broadbent, S. (1979). *One Way TV Advertisements Work*. Journal of
+  the Market Research Society — original "adstock" terminology and
+  the long-carryover ranges for linear TV.
+- *An Analyst's Guide to MMM*, Robyn (Meta) — practical guidance on
+  per-channel half-life ranges. https://facebookexperimental.github.io/Robyn/
+- Gelman, A., Jakulin, A., Pittau, M. G., & Su, Y.-S. (2008). "A Weakly
+  Informative Default Prior Distribution for Logistic and Other
+  Regression Models." *Annals of Applied Statistics*, 2(4): 1360–1383
+  — the methodology that frames the σ-scale choices above as
+  weakly-informative defaults.
 - ``docs/references/adstock_and_saturation.md`` sec. 4 — Wanamaker's
   canonical parameter range table (the primary internal reference).
 """

@@ -113,6 +113,56 @@ def forecast(
             ``future_spend`` is not a supported type.
         ValueError: If the summary lacks channel spend ranges, the plan is
             malformed, or the engine returns a summary with incompatible length.
+
+    Examples:
+        Forecast a 2-period plan against a minimal ``PosteriorSummary`` using a
+        toy stub engine. Production use loads ``summary.json`` from the run
+        artifact and passes a real engine; the input and output shapes match
+        what is shown here.
+
+        The ``paid_search`` channel observed historical spend of [10, 50] per
+        period during training. Plan period 2 spends 60, which is above that
+        range, so ``forecast`` flags it.
+
+        >>> import pandas as pd
+        >>> from wanamaker.engine.summary import (
+        ...     ChannelContributionSummary, PosteriorSummary, PredictiveSummary,
+        ... )
+        >>> from wanamaker.forecast import forecast
+        >>>
+        >>> summary = PosteriorSummary(
+        ...     channel_contributions=[
+        ...         ChannelContributionSummary(
+        ...             channel="paid_search", mean_contribution=0.0,
+        ...             hdi_low=0.0, hdi_high=0.0,
+        ...             observed_spend_min=10.0, observed_spend_max=50.0,
+        ...         ),
+        ...     ]
+        ... )
+        >>>
+        >>> class StubEngine:
+        ...     def posterior_predictive(self, summary, new_data, seed):
+        ...         mean = (new_data["paid_search"].astype(float) * 2.0).tolist()
+        ...         return PredictiveSummary(
+        ...             periods=new_data["period"].astype(str).tolist(),
+        ...             mean=mean,
+        ...             hdi_low=[m - 5.0 for m in mean],
+        ...             hdi_high=[m + 5.0 for m in mean],
+        ...         )
+        >>>
+        >>> plan = pd.DataFrame({
+        ...     "period": ["2026-01-05", "2026-01-12"],
+        ...     "paid_search": [20.0, 60.0],   # 60 exceeds observed_spend_max=50
+        ... })
+        >>> result = forecast(summary, plan, seed=42, engine=StubEngine())
+        >>> result.periods
+        ['2026-01-05', '2026-01-12']
+        >>> result.mean
+        [40.0, 120.0]
+        >>> result.hdi_low, result.hdi_high
+        ([35.0, 115.0], [45.0, 125.0])
+        >>> [(f.period, f.channel, f.direction) for f in result.extrapolation_flags]
+        [('2026-01-12', 'paid_search', 'above_historical_max')]
     """
     if isinstance(posterior_summary, Posterior):
         raise TypeError(

@@ -142,6 +142,62 @@ def compare_scenarios(
         ValueError: If ``plans`` is empty.
         TypeError: If a plan element is not a CSV path or DataFrame.
         ValueError: If a plan is malformed or cannot be forecast.
+
+    Examples:
+        Compare a baseline plan to an aggressive alternative using a stub
+        engine that returns three deterministic per-draw outcomes. The first
+        plan is the baseline; results come back ranked by descending expected
+        outcome (so the winning plan is at index 0). The delta and
+        probability fields are computed paired-by-draw against the baseline.
+
+        Engine outcome rule: 2 × ``paid_search`` per period. Three draws
+        offset by ``-1, 0, +1`` give a tiny non-degenerate spread without
+        sampling noise.
+
+        >>> import pandas as pd
+        >>> from wanamaker.engine.summary import (
+        ...     ChannelContributionSummary, PosteriorSummary, PredictiveSummary,
+        ... )
+        >>> from wanamaker.forecast import compare_scenarios
+        >>>
+        >>> summary = PosteriorSummary(
+        ...     channel_contributions=[
+        ...         ChannelContributionSummary(
+        ...             channel="paid_search", mean_contribution=0.0,
+        ...             hdi_low=0.0, hdi_high=0.0,
+        ...             observed_spend_min=10.0, observed_spend_max=50.0,
+        ...         ),
+        ...     ]
+        ... )
+        >>>
+        >>> class StubEngine:
+        ...     def posterior_predictive(self, summary, new_data, seed):
+        ...         period_mean = (new_data["paid_search"].astype(float) * 2.0).tolist()
+        ...         draws = [
+        ...             [m - 1.0 for m in period_mean],
+        ...             period_mean,
+        ...             [m + 1.0 for m in period_mean],
+        ...         ]
+        ...         return PredictiveSummary(
+        ...             periods=new_data["period"].astype(str).tolist(),
+        ...             mean=period_mean,
+        ...             hdi_low=draws[0], hdi_high=draws[2], draws=draws,
+        ...         )
+        >>>
+        >>> baseline = pd.DataFrame({"period": ["2026-01-05"], "paid_search": [20.0]})
+        >>> aggressive = pd.DataFrame({"period": ["2026-01-05"], "paid_search": [40.0]})
+        >>> results = compare_scenarios(
+        ...     summary, [baseline, aggressive], seed=0, engine=StubEngine(),
+        ... )
+        >>> [(r.plan_name, r.is_baseline, r.expected_outcome_mean) for r in results]
+        [('Plan 2', False, 80.0), ('Plan 1', True, 40.0)]
+        >>> winner = results[0]
+        >>> winner.delta_vs_baseline_mean       # 80 - 40, paired by draw
+        40.0
+        >>> winner.probability_beats_baseline   # all three draws improve
+        1.0
+        >>> winner.probability_material_loss
+        0.0
     """
     if not plans:
         raise ValueError("compare_scenarios requires at least one plan")

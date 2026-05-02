@@ -2,7 +2,9 @@
 
 Guidance for AI coding assistants (Claude Code, Cursor, Aider, Copilot Workspace, etc.) working on the Wanamaker open-source MMM project.
 
-This file is short by design. The strategic and product context lives in `docs/wanamaker_brd_prd.md` (the BRD/PRD). This file covers *how to behave* while building, not *what to build*.
+This file is short by design. The strategic and product context lives in `docs/internal/wanamaker_brd_prd.md` (the BRD/PRD). This file covers *how to behave* while building, not *what to build*.
+
+When you add, move, or rename an FR/NFR claim, update the matching row in [`docs/verification.md`](docs/verification.md) — that file is the single source of truth for "claim → module → test" pointers an external auditor would use to check our work. A merged PR that breaks an entry there is treated the same as a broken docstring.
 
 ---
 
@@ -15,7 +17,7 @@ Wanamaker is an open-source Bayesian Marketing Mix Model targeting mid-market co
 - **Local-first processing:** no network calls in any core operation, no telemetry.
 - **Decision-oriented outputs:** forecasting and scenario comparison, not just descriptive analysis.
 
-The full rationale is in the BRD/PRD. **Read it before making non-trivial decisions.** Path: `docs/wanamaker_brd_prd.md`.
+The full rationale is in the BRD/PRD. **Read it before making non-trivial decisions.** Path: `docs/internal/wanamaker_brd_prd.md`.
 
 ---
 
@@ -37,12 +39,12 @@ These are architectural invariants. Violating them means rebuilding the project'
 
    **Before implementing or modifying any adstock or saturation transformation, read [`docs/references/adstock_and_saturation.md`](docs/references/adstock_and_saturation.md).** It contains the canonical formulas, default priors per channel category, estimation method tradeoffs, and diagnostic patterns that should govern all transformation code.
 
-5. **Reproducibility is a contract.** Per NFR-2, given the same input data, configuration, and random seed, results must be bit-for-bit identical. This means:
+5. **Reproducibility is a contract.** Per NFR-2, given the same input data, configuration, and random seed, every numeric field in the posterior summary must agree across runs at `RTOL=1e-6`. (Strict bit-for-bit identity across platforms is *not* required — that conflicts with NFR-6 cross-platform support, since BLAS and libm differ across CPUs and OSes. The relaxed criterion was set in PRD v0.5; see the change log there.) This means:
    - Use a single, documented seeding discipline. The seed is configured at the top level and passed down explicitly. Do not call `np.random.seed()` or `random.seed()` inside library functions.
    - Sampler operations must use the explicit seed, not the global state.
-   - There is a CI test that runs the same fit twice and compares posteriors bit-for-bit.
+   - There is a CI test (`tests/test_reproducibility.py`, engine-gated) that runs the same fit twice and compares posterior summaries at `RTOL=1e-6`.
 
-6. **The CSV interface is the user contract.** Don't redesign input/output formats without revisiting the PRD. If a field seems redundant or missing, it's likely intentional — check `docs/wanamaker_brd_prd.md` Section 5.1 before refactoring.
+6. **The CSV interface is the user contract.** Don't redesign input/output formats without revisiting the PRD. If a field seems redundant or missing, it's likely intentional — check `docs/internal/wanamaker_brd_prd.md` Section 5.1 before refactoring.
 
 ---
 
@@ -221,4 +223,4 @@ Wanamaker is a decision-support tool, not a constrained-optimization budget engi
 - "guaranteed lift"
 - "maximize ROI" used as a promise or product goal
 
-The unit test `tests/unit/test_terminology_guardrails.py` enforces this on every Jinja2 template under `src/wanamaker/reports/templates/` and every Python module under `USER_FACING_COPY_DIRS` (today: `src/wanamaker/reports/` and `src/wanamaker/trust_card/`). When you add a new module that emits literal strings into rendered output, append its directory to `USER_FACING_COPY_DIRS` so the guardrail covers it. If you have a legitimate reason to *discuss* one of the banned phrases (for example, to tell readers "Wanamaker does not produce an optimized budget"), do so in contributor-facing or design docs (this file, `docs/architecture.md`, `docs/risk_adjusted_allocation.md`) — those are out of scope for the guardrail test.
+The unit test `tests/unit/test_terminology_guardrails.py` enforces this on every Jinja2 template under `src/wanamaker/reports/templates/` and every Python module under `USER_FACING_COPY_DIRS` (today: `src/wanamaker/reports/` and `src/wanamaker/trust_card/`). When you add a new module that emits literal strings into rendered output, append its directory to `USER_FACING_COPY_DIRS` so the guardrail covers it. If you have a legitimate reason to *discuss* one of the banned phrases (for example, to tell readers "Wanamaker does not produce an optimized budget"), do so in contributor-facing or design docs (this file, `docs/internal/architecture.md`, `docs/internal/risk_adjusted_allocation.md`) — those are out of scope for the guardrail test.

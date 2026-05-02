@@ -7,10 +7,13 @@ An open-source marketing mix model for teams that need credible measurement with
 ---
 
 **Document type:** Combined Business Requirements Document (BRD) and Product Requirements Document (PRD)
-**Version:** 0.4 (locked — final pre-build version)
-**Date:** April 28, 2026
+**Version:** 0.5
+**Date:** May 2, 2026
 **Status:** Locked. Next revision driven by Phase -1 outputs.
 **License (target):** MIT
+
+**Changes from v0.4:**
+- Relaxed NFR-2 reproducibility wording from "bit-for-bit reproducible" to "numerical agreement at RTOL=1e-6 across all posterior-summary float fields." Strict bit-for-bit identity across platforms conflicts with the cross-platform support commitment in NFR-6 — BLAS and other math libraries produce sub-`1e-6` variation across CPU architectures and OS versions. The implemented test (`tests/test_reproducibility.py`) already used the relaxed criterion; this change makes the requirement match the test of record. Surfaced by [`docs/verification.md`](../verification.md) § 6.
 
 **Changes from v0.3:**
 - Added `--anchor-strength` CLI flag with named presets (light/medium/heavy) mapping to underlying `w` values (FR-4.4)
@@ -472,7 +475,7 @@ The documentation includes an explicit "Privacy and Data Handling" section addre
 See FR-3.5 for the runtime tier specifications. The Standard tier (under 30 minutes on a modern laptop CPU for 150 weeks × 12 channels at the national level) is the default and the tier against which adoption will be evaluated.
 
 **NFR-2 — Reproducibility**
-Given the same input data, the same configuration, and the same random seed, model fits must be bit-for-bit reproducible.
+Given the same input data, the same configuration, and the same random seed, every numeric field in the engine-neutral `PosteriorSummary` must agree across runs at a relative tolerance of `1e-6`. Strict bit-for-bit identity across platforms is not required: BLAS, libm, and other math-library implementations produce inconsequential floating-point variation across CPU architectures and OS versions, and demanding bit-for-bit identity would conflict with NFR-6 (cross-platform support). The test of record is `tests/test_reproducibility.py`, which fits the synthetic ground-truth benchmark twice with the same seed and asserts numerical agreement at `RTOL=1e-6` on every float field of the summary. Tightening the criterion is a future call to make in concert with NFR-6 and the engine choice (per `docs/internal/architecture.md`'s "Cross-platform reproducibility" entry).
 
 **NFR-3 — Documentation Quality**
 Documentation is a v1 deliverable, not a follow-up. The documentation site must include the following sections at minimum:

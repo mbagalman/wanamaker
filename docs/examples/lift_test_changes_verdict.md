@@ -265,5 +265,5 @@ spend-share.
 
 - [DTC reallocates linear TV to CTV](tv_to_ctv.md)
 - [Refresh after a noisy quarter](refresh_after_noisy_quarter.md)
-- [What Wanamaker tells your CMO](../cmo_guide.md) — how to communicate
+- [What Wanamaker tells your CMO](../guides/cmo_guide.md) — how to communicate
   a lift-test-driven plan change to non-technical stakeholders

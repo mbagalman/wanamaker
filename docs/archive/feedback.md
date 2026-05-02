@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-04-29.
 
-This file started as a constructive critique of `docs/architecture.md` and the
+This file started as a constructive critique of `docs/internal/architecture.md` and the
 initial GitHub issue plan. Most of the load-bearing concerns have now been
 addressed in code, issues, or follow-up tracking. This version records what is
 complete and what still needs attention.
@@ -149,7 +149,7 @@ The remaining work is release verification, not a product-design gap.
 
 **Status: Resolved.**
 
-`docs/architecture.md` has been refreshed:
+`docs/internal/architecture.md` has been refreshed:
 - All module statuses updated to reflect implementation reality.
 - Artifact layout updated to include `trust_card.json`, `refresh_diff.json`, and the versioned envelope format.
 - Engine/backend status updated to reflect the implemented PyMC backend.

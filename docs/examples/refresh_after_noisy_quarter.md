@@ -178,5 +178,5 @@ fraction is high.
   to score a proposed budget change
 - [Lift-test calibration changes the verdict](lift_test_changes_verdict.md) —
   when a real-world experiment contradicts the model
-- [Risk-Adjusted Allocation Ramps](../risk_adjusted_allocation.md) —
+- [Risk-Adjusted Allocation Ramps](../internal/risk_adjusted_allocation.md) —
   how the Trust Card and refresh diff feed into ramp gating

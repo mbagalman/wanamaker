@@ -30,9 +30,9 @@ env/
 # Docs build output
 site/
 
-# Local-only research folders
-Blue Ocean Analysis/
-Competitor Research/
+# Local-only research folders (kept under archive/research/ for tidiness;
+# never committed to GitHub).
+archive/research/
 
 # Claude Code local settings
 .claude/

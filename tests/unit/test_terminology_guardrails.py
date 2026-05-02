@@ -18,8 +18,8 @@ test enforces it on:
    New modules that emit literal copy into user-facing output should be
    added to ``USER_FACING_COPY_DIRS``.
 
-Contributor-facing or design docs (``AGENTS.md``, ``docs/architecture.md``,
-``docs/risk_adjusted_allocation.md``) are out of scope — those
+Contributor-facing or design docs (``AGENTS.md``, ``docs/internal/architecture.md``,
+``docs/internal/risk_adjusted_allocation.md``) are out of scope — those
 legitimately discuss the banned phrases when explaining what Wanamaker
 does *not* do.
 """

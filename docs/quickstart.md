@@ -321,7 +321,7 @@ clean run, so a `stage` verdict at 50% is the typical "everything looks
 good" outcome and `proceed` at 100% is uncommon — that is intentional.
 
 For the design rationale and the four-status interpretation guide, see
-[Risk-Adjusted Allocation Ramps](risk_adjusted_allocation.md).
+[Risk-Adjusted Allocation Ramps](internal/risk_adjusted_allocation.md).
 
 ## Troubleshooting
 
@@ -355,8 +355,8 @@ Trust Card flags a risk. Cautious language is a feature, not a failure.
 
 - [Worked Examples](examples/index.md) — three end-to-end walk-throughs:
   TV→CTV reallocation, refresh after a noisy quarter, lift-test calibration
-- [Analyst's Guide](analyst_guide.md)
-- [What Wanamaker Tells Your CMO](cmo_guide.md)
-- [Risk-Adjusted Allocation Ramps](risk_adjusted_allocation.md)
-- [Privacy and Data Handling](privacy.md)
-- [Technical Architecture](architecture.md)
+- [Analyst's Guide](guides/analyst_guide.md)
+- [What Wanamaker Tells Your CMO](guides/cmo_guide.md)
+- [Risk-Adjusted Allocation Ramps](internal/risk_adjusted_allocation.md)
+- [Privacy and Data Handling](guides/privacy.md)
+- [Technical Architecture](internal/architecture.md)

@@ -1,5 +1,12 @@
 # Risk-Adjusted Allocation Ramps
 
+> **Note.** This is the **design note** — rationale, language, and the
+> v1 verdict categories. The formulas, the published sources for each
+> formula, and the per-call-site citation map live in
+> [`docs/references/risk_adjusted_allocation_math.md`](../references/risk_adjusted_allocation_math.md).
+> Read this doc for *why*, that one for *what each line of math is and
+> where it comes from*.
+
 ## Purpose
 
 Wanamaker should not tell a user to make a large, unfamiliar marketing shift just
@@ -566,10 +573,10 @@ matches the expected category.
 
 Surface the feature in user-facing docs without rewriting them:
 
-- `docs/analyst_guide.md`: a "Risk-adjusted ramps" section explaining the
+- `docs/guides/analyst_guide.md`: a "Risk-adjusted ramps" section explaining the
   four output categories and when to read them as decision guidance vs
   evidence prompts.
-- `docs/cmo_guide.md`: a paragraph on ramp recommendations as the
+- `docs/guides/cmo_guide.md`: a paragraph on ramp recommendations as the
   conservative alternative to "the model says move 100% to Plan B."
 - `docs/quickstart.md`: an optional Step 7 showing the ramp command on the
   bundled `public_benchmark` dataset.

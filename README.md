@@ -12,7 +12,7 @@ measurement without a PhD program.
 ---
 
 **Status:** Active pre-1.0 development. The combined BRD/PRD is locked at v0.4
-and lives in [`docs/wanamaker_brd_prd.md`](docs/wanamaker_brd_prd.md). The
+and lives in [`docs/internal/wanamaker_brd_prd.md`](docs/internal/wanamaker_brd_prd.md). The
 core local workflow is now in place: `diagnose`, `fit`, `report`, `showcase`,
 `trust-card`, `export`, `forecast`, `compare-scenarios`, `recommend-ramp`,
 `refresh`, and `run --example public_benchmark`.
@@ -107,15 +107,15 @@ If you can budget $80–120K/year for a managed service,
 [Recast](https://getrecast.com) is the obvious commercial comparison.
 
 Full long-form comparison with honest tradeoffs:
-[`docs/comparison.md`](docs/comparison.md).
+[`docs/guides/comparison.md`](docs/guides/comparison.md).
 
 ## Reading order
 
-1. [BRD/PRD](docs/wanamaker_brd_prd.md) — strategic and product context
-2. [Privacy and Data Handling](docs/privacy.md) — confidentiality and data isolation guarantees
+1. [BRD/PRD](docs/internal/wanamaker_brd_prd.md) — strategic and product context
+2. [Privacy and Data Handling](docs/guides/privacy.md) — confidentiality and data isolation guarantees
 3. [`AGENTS.md`](AGENTS.md) — guidance for AI coding assistants and human
    contributors on how to work in this codebase
-4. [Comparison to Other Tools](docs/comparison.md) — Wanamaker vs. Robyn,
+4. [Comparison to Other Tools](docs/guides/comparison.md) — Wanamaker vs. Robyn,
    Meridian, Recast, PyMC-Marketing
 
 ## License

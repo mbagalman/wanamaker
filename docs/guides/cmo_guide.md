@@ -219,7 +219,7 @@ How to use this in practice:
   the reason.
 
 The full design rationale and the math live in
-[`docs/risk_adjusted_allocation.md`](risk_adjusted_allocation.md). For
+[`docs/internal/risk_adjusted_allocation.md`](../internal/risk_adjusted_allocation.md). For
 v1 the ramp will rarely recommend a full 100% move even on a clean run —
 that is intentional. The product's position is "the model can advise on
 direction; the user owns the decision to commit the full budget."

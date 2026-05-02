@@ -1,4 +1,4 @@
-"""Risk-adjusted allocation ramps (FR-5.6, design note: docs/risk_adjusted_allocation.md).
+"""Risk-adjusted allocation ramps (FR-5.6, design note: docs/internal/risk_adjusted_allocation.md).
 
 Given a baseline plan ``x0`` and a model-favored target plan ``x_star``,
 ``recommend_ramp`` evaluates a ladder of partial moves
@@ -18,6 +18,32 @@ This module is engine-neutral. Like ``forecast()`` and
 never imports any specific Bayesian backend. The risk math runs over
 the per-draw outcome matrix exposed in ``PredictiveSummary.draws``
 (added in #64).
+
+References:
+    - Kelly criterion (position-sizing intuition):
+      Kelly, J. L. (1956). "A New Interpretation of Information Rate."
+      *Bell System Technical Journal*, 35(4): 917–926.
+    - Continuous-time Kelly fraction ``f* ≈ μ / σ²`` used in
+      ``_fractional_kelly``:
+      Thorp, E. O. (2006). "The Kelly Criterion in Blackjack, Sports
+      Betting, and the Stock Market." In Zenios & Ziemba (eds.),
+      *Handbook of Asset and Liability Management*, vol. 1.
+      North-Holland.
+    - Fractional-Kelly multiplier (trading growth for drawdown
+      protection — the Trust Card → multiplier mapping in
+      ``_kelly_multiplier``):
+      MacLean, L. C., Ziemba, W. T., & Blazenko, G. (1992). "Growth
+      versus Security in Dynamic Investment Analysis." *Management
+      Science*, 38(11): 1562–1585.
+    - Conditional value-at-risk (the ``CVaR_5`` gate in
+      ``_build_candidate``):
+      Rockafellar, R. T., & Uryasev, S. (2000). "Optimization of
+      Conditional Value-at-Risk." *Journal of Risk*, 2(3): 21–41.
+    - The Wanamaker-specific gate set, multiplier table, and decision
+      rule are documented in ``docs/internal/risk_adjusted_allocation.md``
+      (design rationale) and
+      ``docs/references/risk_adjusted_allocation_math.md`` (formulas
+      and citations grouped per implementation site).
 """
 
 from __future__ import annotations
@@ -193,6 +219,75 @@ def recommend_ramp(
         ValueError: If the summary has no channel contributions, the
             two plans don't align, the engine doesn't return per-draw
             outcomes, or the plans are otherwise malformed.
+
+    Examples:
+        Evaluate a ramp from a flat baseline (10/period) toward a +50%
+        ``paid_search`` target (15/period) under a clean Trust Card. The
+        ladder evaluates ``f`` ∈ ``{10%, 25%, 50%, 75%, 100%}``; the
+        recommendation reports the largest fraction that passes every gate.
+
+        With the v1 default Kelly multiplier of 0.5 (clean Trust Card) and a
+        tight posterior, the fractional-Kelly cap clamps to 0.5. Fractions
+        ≤ 0.5 pass all gates; the 75% and 100% candidates fail only on
+        ``fractional_kelly`` — an evidence-quality gate — so the verdict is
+        ``stage`` rather than ``proceed`` or ``do_not_recommend``.
+
+        >>> import numpy as np, pandas as pd
+        >>> from wanamaker.engine.summary import (
+        ...     ChannelContributionSummary, PosteriorSummary, PredictiveSummary,
+        ... )
+        >>> from wanamaker.forecast.ramp import recommend_ramp
+        >>>
+        >>> summary = PosteriorSummary(
+        ...     channel_contributions=[
+        ...         ChannelContributionSummary(
+        ...             channel="paid_search", mean_contribution=0.0,
+        ...             hdi_low=0.0, hdi_high=0.0,
+        ...             observed_spend_min=10.0, observed_spend_max=200.0,
+        ...         ),
+        ...     ]
+        ... )
+        >>>
+        >>> class StubEngine:
+        ...     # Linear mean (1000 + 2 * spend) plus tight Gaussian noise.
+        ...     # 400 draws keeps p_positive / CVaR estimates stable.
+        ...     def posterior_predictive(self, summary, new_data, seed):
+        ...         rng = np.random.default_rng(seed)
+        ...         per_period = (
+        ...             1000.0 + new_data["paid_search"].to_numpy(dtype=float) * 2.0
+        ...         )
+        ...         noise = rng.normal(0.0, 1.0, size=(400, len(new_data)))
+        ...         draws = per_period[None, :] + noise
+        ...         return PredictiveSummary(
+        ...             periods=new_data["period"].astype(str).tolist(),
+        ...             mean=draws.mean(axis=0).tolist(),
+        ...             hdi_low=np.quantile(draws, 0.025, axis=0).tolist(),
+        ...             hdi_high=np.quantile(draws, 0.975, axis=0).tolist(),
+        ...             draws=draws.tolist(),
+        ...         )
+        >>>
+        >>> baseline = pd.DataFrame({
+        ...     "period": ["2026-01", "2026-02"], "paid_search": [10.0, 10.0],
+        ... })
+        >>> target = pd.DataFrame({
+        ...     "period": ["2026-01", "2026-02"], "paid_search": [15.0, 15.0],
+        ... })
+        >>> rec = recommend_ramp(
+        ...     summary, baseline, target, seed=42, engine=StubEngine(),
+        ... )
+        >>> rec.status
+        'stage'
+        >>> rec.recommended_fraction
+        0.5
+        >>> # Higher fractions failed only on the v1 fractional-Kelly cap,
+        >>> # so the verdict is "stage" (refresh after new data may lift it).
+        >>> for c in rec.candidates:
+        ...     print(c.fraction, c.passes, c.failed_gates)
+        0.1 True []
+        0.25 True []
+        0.5 True []
+        0.75 False ['fractional_kelly']
+        1.0 False ['fractional_kelly']
     """
     risk_tolerance = risk_tolerance or RiskTolerance()
     contributions = list(posterior_summary.channel_contributions)
@@ -400,9 +495,29 @@ def _fractional_kelly(
 ) -> float:
     """Fractional Kelly clamped to ``[0, 1]`` then scaled by Trust Card multiplier.
 
-    Without the clamp the raw Kelly value is unbounded above and the
-    ``f <= fractional_kelly`` gate becomes decorative. Clamping keeps it
-    in the same scale as the candidate ramp fractions.
+    Uses the continuous-time Kelly approximation ``f* ≈ μ / σ²`` on the
+    relative-return draws ``r_s = delta_s / baseline_outcome_s``. The raw
+    Kelly value is unbounded above (Kelly 1956 derives ``(bp - q) / b`` for
+    binary bets; the continuous form in Thorp 2006 has the same scaling
+    pathology when ``σ`` is small relative to ``μ``), so we clamp to
+    ``[0, 1]`` before applying the Trust-Card-derived multiplier. Without
+    the clamp the ``f <= fractional_kelly`` gate becomes decorative; with
+    it the gate stays on the same scale as the candidate ramp fractions.
+
+    The multiplier (``0.5 / 0.25 / 0.10`` for clean / moderate / weak Trust
+    Cards) is "fractional Kelly" in the sense of MacLean, Ziemba & Blazenko
+    (1992): scaling Kelly down trades long-run growth rate for
+    lower-drawdown behaviour. v1 deliberately uses conservative multipliers;
+    the design note (``docs/internal/risk_adjusted_allocation.md`` § "Kelly-Inspired
+    Sizing") explains why.
+
+    References:
+        - Kelly, J. L. (1956). *Bell System Technical Journal*, 35(4):
+          917–926.
+        - Thorp, E. O. (2006). *Handbook of Asset and Liability
+          Management*, vol. 1. North-Holland.
+        - MacLean, L. C., Ziemba, W. T., & Blazenko, G. (1992).
+          *Management Science*, 38(11): 1562–1585.
     """
     safe_baseline = np.maximum(baseline_outcome_s, 1.0)
     r_s = delta_full_s / safe_baseline
@@ -456,6 +571,11 @@ def _build_candidate(
     probability_positive = float(np.mean(delta_s > 0))
     probability_material_loss = float(np.mean(delta_s < -loss_threshold))
     q05_increment = float(np.quantile(delta_s, 0.05))
+    # CVaR_5 = expected loss conditional on being in the worst 5% tail
+    # (Rockafellar & Uryasev, "Optimization of Conditional Value-at-Risk",
+    # *Journal of Risk* 2(3), 2000). Reported as a signed delta — negative
+    # values are losses; the gate compares against ``cvar_tolerance`` which
+    # is itself negative.
     tail_mask = delta_s <= q05_increment
     cvar_5 = float(np.mean(delta_s[tail_mask])) if tail_mask.any() else q05_increment
 

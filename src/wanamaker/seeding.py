@@ -1,7 +1,11 @@
 """Central seeding discipline.
 
 NFR-2 (Reproducibility) and AGENTS.md Hard Rule 5: given the same input data,
-configuration, and seed, results must be bit-for-bit identical.
+configuration, and seed, every numeric field in the posterior summary must
+agree across runs at ``RTOL=1e-6``. Strict bit-for-bit identity across
+platforms is not required (it would conflict with NFR-6 cross-platform
+support); the relaxed criterion is the test of record at
+``tests/test_reproducibility.py``.
 
 The discipline:
 
