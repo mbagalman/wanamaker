@@ -11,9 +11,12 @@ The full rule lives in ``AGENTS.md`` under "Product terminology". This
 test enforces it on:
 
 1. Every Jinja2 template under ``src/wanamaker/reports/templates/``.
-2. Every Python helper in ``src/wanamaker/reports/`` that injects
-   literal copy into a rendered artifact (decision notes, verdict
-   text, gate explanations, etc.).
+2. Every Python module under ``USER_FACING_COPY_DIRS`` whose strings
+   flow into a rendered artifact — currently ``src/wanamaker/reports/``
+   plus ``src/wanamaker/trust_card/`` (Trust-Card dimension explanations
+   render directly into the executive summary, showcase, and one-pager).
+   New modules that emit literal copy into user-facing output should be
+   added to ``USER_FACING_COPY_DIRS``.
 
 Contributor-facing or design docs (``AGENTS.md``, ``docs/architecture.md``,
 ``docs/risk_adjusted_allocation.md``) are out of scope — those
@@ -42,6 +45,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = REPO_ROOT / "src" / "wanamaker" / "reports"
 TEMPLATES_DIR = REPORTS_DIR / "templates"
 
+# Directories whose Python modules produce literal strings that get
+# rendered into user-facing artifacts. Add a directory here when its
+# output is consumed by reports / showcase / trust-card surfaces.
+USER_FACING_COPY_DIRS: tuple[Path, ...] = (
+    REPORTS_DIR,
+    REPO_ROOT / "src" / "wanamaker" / "trust_card",
+)
+
 
 def _matches_in(text: str) -> list[str]:
     """Return banned phrases that appear in ``text`` (case-insensitive)."""
@@ -53,15 +64,18 @@ def _template_files() -> list[Path]:
     return sorted(TEMPLATES_DIR.glob("*.j2"))
 
 
-def _reports_python_files() -> list[Path]:
-    """Python files in ``src/wanamaker/reports/`` that emit user-facing copy.
+def _user_facing_python_files() -> list[Path]:
+    """Python files across every ``USER_FACING_COPY_DIRS`` directory.
 
     Excludes ``__init__.py`` (re-exports only, no literal copy) but keeps
     every other module — context shapers, verdict text, decision notes,
-    chart helpers, Excel exporter — since any of them could leak banned
-    phrasing into rendered output.
+    chart helpers, Excel exporter, Trust-Card dimension explanations —
+    since any of them could leak banned phrasing into rendered output.
     """
-    return sorted(p for p in REPORTS_DIR.glob("*.py") if p.name != "__init__.py")
+    files: list[Path] = []
+    for directory in USER_FACING_COPY_DIRS:
+        files.extend(p for p in directory.glob("*.py") if p.name != "__init__.py")
+    return sorted(files)
 
 
 @pytest.mark.parametrize("path", _template_files(), ids=lambda p: p.name)
@@ -75,8 +89,10 @@ def test_no_banned_phrases_in_jinja_templates(path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("path", _reports_python_files(), ids=lambda p: p.name)
-def test_no_banned_phrases_in_reports_python_modules(path: Path) -> None:
+@pytest.mark.parametrize(
+    "path", _user_facing_python_files(), ids=lambda p: f"{p.parent.name}/{p.name}",
+)
+def test_no_banned_phrases_in_user_facing_python_modules(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     matches = _matches_in(text)
     assert not matches, (
@@ -109,18 +125,41 @@ def test_guardrail_at_least_one_template_was_scanned() -> None:
     assert not missing, f"expected templates not found: {missing}"
 
 
+def test_guardrail_covers_each_user_facing_directory() -> None:
+    """Sanity: every directory in ``USER_FACING_COPY_DIRS`` contributed at
+    least one file to the scan. Catches the silent-failure mode where
+    a future restructure leaves a directory empty without anyone
+    noticing the guardrail effectively dropped it.
+    """
+    discovered = _user_facing_python_files()
+    assert discovered, "no Python helpers discovered across USER_FACING_COPY_DIRS"
+    parents = {p.parent for p in discovered}
+    for directory in USER_FACING_COPY_DIRS:
+        assert directory in parents, (
+            f"directory {directory.relative_to(REPO_ROOT)} is in "
+            "USER_FACING_COPY_DIRS but contributed zero files to the scan"
+        )
+
+
 def test_guardrail_at_least_one_python_helper_was_scanned() -> None:
     """Sanity: glob picked up the Python helpers that emit copy.
 
-    Same silent-failure guard as above for the Python side.
+    Same silent-failure guard as above for the Python side, anchored on
+    a few specific files from each scanned directory so a layout change
+    that moves them surfaces explicitly.
     """
-    helpers = _reports_python_files()
-    assert helpers, "no Python helpers discovered under REPORTS_DIR"
+    helpers = _user_facing_python_files()
+    assert helpers, "no Python helpers discovered under USER_FACING_COPY_DIRS"
     names = {p.name for p in helpers}
-    # At minimum the showcase shaper, the one-pager shaper, and the
-    # render module must be in scope. Update deliberately if the layout
-    # moves.
-    expected_minimum = {"showcase.py", "trust_card_one_pager.py", "render.py"}
+    # At minimum the showcase shaper, the one-pager shaper, the render
+    # module, and the Trust-Card compute module must all be in scope.
+    # Update deliberately if the layout moves.
+    expected_minimum = {
+        "showcase.py",
+        "trust_card_one_pager.py",
+        "render.py",
+        "compute.py",  # src/wanamaker/trust_card/compute.py
+    }
     missing = expected_minimum - names
     assert not missing, f"expected helpers not found: {missing}"
 
