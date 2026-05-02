@@ -276,6 +276,42 @@ def test_suggest_scenarios_no_candidates_exits_non_zero(
     assert "## No candidate plans produced" in report
 
 
+@pytest.mark.parametrize(
+    ("flag", "value", "match_substring"),
+    [
+        ("--top-n", "0", "top_n"),
+        ("--max-channel-change", "2.0", "max_channel_change"),
+        ("--budget-mode", "nonsense", "budget_mode"),
+    ],
+)
+def test_suggest_scenarios_rejects_invalid_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str,
+    value: str,
+    match_substring: str,
+) -> None:
+    """Invalid CLI overrides must fail closed before any generation runs.
+
+    Pydantic validates the override round-trip; ``--top-n 0``,
+    ``--max-channel-change 2.0``, and ``--budget-mode nonsense`` should
+    each surface as a non-zero exit with an actionable error.
+    """
+    result, run_dir, _ = _invoke(
+        tmp_path, monkeypatch, extra_args=(flag, value),
+    )
+
+    assert result.exit_code == 1, result.output
+    combined = (result.output or "") + (result.stderr or "")
+    assert "invalid scenario_generation override" in combined, combined
+    assert match_substring in combined, combined
+    # Generation must not have run: no candidate CSVs and no report.
+    assert not (run_dir / "candidates").exists() or not list(
+        (run_dir / "candidates").glob("*.csv")
+    )
+    assert not (run_dir / "scenario_suggestions.md").exists()
+
+
 def test_suggest_scenarios_reads_yaml_constraint_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

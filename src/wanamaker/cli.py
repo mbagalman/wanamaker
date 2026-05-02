@@ -1227,6 +1227,8 @@ def _resolved_scenario_constraints(
     users can re-run ``suggest-scenarios`` with different bounds without
     re-fitting the model.
     """
+    from pydantic import ValidationError
+
     from wanamaker.config import ScenarioGenerationConfig
     from wanamaker.forecast import resolve_scenario_generation_constraints
 
@@ -1239,11 +1241,19 @@ def _resolved_scenario_constraints(
     if budget_mode is not None:
         overrides["budget_mode"] = budget_mode
     if overrides:
+        # ``model_copy(update=...)`` skips validation, so bounds/literal
+        # checks on the overridden fields would silently slip through.
+        # Round-trip through ``model_validate`` to fail closed on invalid
+        # CLI values (e.g. ``--top-n 0``, ``--budget-mode nonsense``).
+        merged = {**base.model_dump(), **overrides}
         try:
-            base = base.model_copy(update=overrides)
-        except Exception as exc:  # pydantic ValidationError surfaces as Exception subtype
+            base = ScenarioGenerationConfig.model_validate(merged)
+        except ValidationError as exc:
             typer.echo(
-                typer.style(f"Error: invalid override: {exc}", fg=typer.colors.RED),
+                typer.style(
+                    f"Error: invalid scenario_generation override:\n{exc}",
+                    fg=typer.colors.RED,
+                ),
                 err=True,
             )
             raise typer.Exit(code=1) from exc
