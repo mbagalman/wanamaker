@@ -11,6 +11,7 @@ Core commands per FR-6.3 plus the HTML showcase:
     wanamaker forecast --run-id <run_id> --plan <plan.csv>
     wanamaker compare-scenarios --run-id <run_id> --plans <p1.csv> <p2.csv> ...
     wanamaker compare-calibration --uncalibrated-run <id> --calibrated-run <id>
+    wanamaker suggest-scenarios --run-id <run_id> --baseline <base.csv>
     wanamaker recommend-ramp --run-id <run_id> --baseline <base.csv> --target <alt.csv>
     wanamaker refresh --config <config.yaml>
 
@@ -1110,6 +1111,149 @@ def compare_scenarios(
     output_path = output if output is not None else paths.root / "scenario_comparison.md"
     output_path.write_text(_format_scenario_comparison_markdown(results, run_id))
     typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
+
+
+@app.command(name="suggest-scenarios")
+def suggest_scenarios_cmd(
+    run_id: str = typer.Option(..., "--run-id"),
+    baseline: Path = typer.Option(..., "--baseline", exists=True),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    top_n: int | None = typer.Option(
+        None,
+        "--top-n",
+        help="Override the run config's top_n (max candidate plans to return).",
+    ),
+    max_channel_change: float | None = typer.Option(
+        None,
+        "--max-channel-change",
+        help=(
+            "Override the run config's max_channel_change "
+            "(maximum relative change for any channel)."
+        ),
+    ),
+    budget_mode: str | None = typer.Option(
+        None,
+        "--budget-mode",
+        help=(
+            "Override the run config's budget_mode "
+            "(hold_total | allow_increase | allow_decrease | allow_change)."
+        ),
+    ),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help=(
+            "Directory to write candidate CSVs into. "
+            "Default: <run_dir>/candidates/"
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None,
+        "--seed",
+        help="Override the run's stored seed for posterior-predictive sampling.",
+    ),
+) -> None:
+    """Generate bounded candidate budget plans, ranked with uncertainty.
+
+    The model evaluates the candidates it generated; it does not
+    perform constrained optimization. Candidates respect the explicit
+    ``scenario_generation`` constraint contract from the run config (or
+    the CLI overrides) and are ranked against the supplied baseline.
+    """
+    from wanamaker.config import load_config
+    from wanamaker.forecast import suggest_scenarios as run_suggest
+
+    plan_engine, _, summary, paths, run_seed = _load_run_for_forecast(
+        artifact_dir, run_id
+    )
+    seed_used = seed if seed is not None else run_seed
+    cfg = load_config(paths.config)
+    constraints = _resolved_scenario_constraints(
+        cfg,
+        top_n=top_n,
+        max_channel_change=max_channel_change,
+        budget_mode=budget_mode,
+    )
+
+    out_dir = output_dir if output_dir is not None else paths.root / "candidates"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    typer.echo(
+        f"Generating up to {constraints.top_n} candidate plan(s) for run "
+        f"{run_id} (seed={seed_used})…"
+    )
+    result = run_suggest(
+        summary,
+        baseline,
+        constraints,
+        seed=seed_used,
+        engine=plan_engine,
+        baseline_label=baseline.stem,
+    )
+
+    written: list[Path] = []
+    for candidate in result.candidates:
+        csv_path = out_dir / f"{candidate.label}.csv"
+        candidate.plan.to_csv(csv_path, index=False)
+        written.append(csv_path)
+
+    _print_suggest_scenarios(result, written)
+
+    report_path = paths.root / "scenario_suggestions.md"
+    report_path.write_text(
+        _format_suggest_scenarios_markdown(result, run_id, written),
+        encoding="utf-8",
+    )
+    typer.echo(typer.style(f"\nReport saved: {report_path}", fg=typer.colors.GREEN))
+
+    if not result.candidates:
+        raise typer.Exit(code=1)
+
+
+def _resolved_scenario_constraints(
+    cfg: Any,
+    *,
+    top_n: int | None,
+    max_channel_change: float | None,
+    budget_mode: str | None,
+) -> Any:
+    """Resolve scenario constraints from config, applying any CLI overrides.
+
+    CLI flags override individual fields without rewriting the YAML, so
+    users can re-run ``suggest-scenarios`` with different bounds without
+    re-fitting the model.
+    """
+    from wanamaker.config import ScenarioGenerationConfig
+    from wanamaker.forecast import resolve_scenario_generation_constraints
+
+    base = cfg.scenario_generation or ScenarioGenerationConfig()
+    overrides: dict[str, Any] = {}
+    if top_n is not None:
+        overrides["top_n"] = top_n
+    if max_channel_change is not None:
+        overrides["max_channel_change"] = max_channel_change
+    if budget_mode is not None:
+        overrides["budget_mode"] = budget_mode
+    if overrides:
+        try:
+            base = base.model_copy(update=overrides)
+        except Exception as exc:  # pydantic ValidationError surfaces as Exception subtype
+            typer.echo(
+                typer.style(f"Error: invalid override: {exc}", fg=typer.colors.RED),
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+
+    overridden_cfg = cfg.model_copy(update={"scenario_generation": base})
+    try:
+        return resolve_scenario_generation_constraints(overridden_cfg)
+    except ValueError as exc:
+        typer.echo(typer.style(f"Error: {exc}", fg=typer.colors.RED), err=True)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command(name="compare-calibration")
@@ -2248,6 +2392,206 @@ def _format_scenario_comparison_markdown(results: list[Any], run_id: str) -> str
                         f"{flag.observed_spend_max:,.0f})"
                     )
         lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+_BLOCKED_REASON_LABELS: dict[str, str] = {
+    "locked": "locked by config",
+    "excluded": "excluded by config",
+    "spend_invariant": "spend-invariant; excluded from reallocation guidance (FR-3.2)",
+    "zero_baseline": "zero baseline spend; percentage moves undefined from zero",
+}
+
+
+def _print_suggest_scenarios(result: Any, written: list[Path]) -> None:
+    """Print a compact summary of generated candidate scenarios.
+
+    Falls back to a clear "no candidates generated" message when the
+    safety gate refused every attempt; the saved Markdown still records
+    why so the user can audit.
+    """
+    typer.echo("")
+    typer.echo("Candidate scenarios (bounded; not optimized)")
+    typer.echo("")
+
+    constraints = result.constraints
+    typer.echo(
+        f"  Constraints: budget_mode={constraints.budget_mode}, "
+        f"top_n={constraints.top_n}, "
+        f"max_channel_change={constraints.max_channel_change:.0%}, "
+        f"max_total_moved_budget={constraints.max_total_moved_budget:.0%}"
+    )
+    if result.blocked_channels:
+        joined = ", ".join(
+            f"{channel} ({_BLOCKED_REASON_LABELS.get(reason, reason)})"
+            for channel, reason in sorted(result.blocked_channels.items())
+        )
+        typer.echo(typer.style(f"  Blocked channels: {joined}", fg=typer.colors.YELLOW))
+
+    if not result.candidates:
+        typer.echo(
+            typer.style(
+                "  No candidate plans were produced. "
+                "Either no eligible donor/recipient pair exists or every "
+                "attempt failed the safety gate. See the saved report for details.",
+                fg=typer.colors.YELLOW,
+            )
+        )
+        return
+
+    typer.echo("")
+    typer.echo(
+        f"  {'Rank':<5} {'Plan':<36} {'Expected outcome':>18} "
+        f"{'Delta vs baseline':>16} {'P(beats)':>10} {'P(loss)':>9}"
+    )
+    for rank, ranked in enumerate(result.rankings, start=1):
+        if ranked.is_baseline:
+            delta_label = "—"
+            p_beats_label = "—"
+            p_loss_label = "—"
+        else:
+            delta_label = f"{ranked.delta_vs_baseline_mean:+,.0f}"
+            p_beats_label = f"{ranked.probability_beats_baseline:.0%}"
+            p_loss_label = f"{ranked.probability_material_loss:.0%}"
+        marker = " (baseline)" if ranked.is_baseline else ""
+        plan_label = (ranked.plan_name + marker)[:36]
+        typer.echo(
+            f"  {rank:<5} {plan_label:<36} "
+            f"{ranked.expected_outcome_mean:>18,.0f} "
+            f"{delta_label:>16} {p_beats_label:>10} {p_loss_label:>9}"
+        )
+
+    typer.echo("")
+    for ranked in result.rankings:
+        typer.echo(f"  {ranked.plan_name}: {ranked.interpretation}")
+
+    if written:
+        typer.echo("")
+        typer.echo(f"  Wrote {len(written)} candidate CSV(s) to {written[0].parent}")
+
+
+def _format_suggest_scenarios_markdown(
+    result: Any,
+    run_id: str,
+    written: list[Path],
+) -> str:
+    """Saved Markdown report for ``suggest-scenarios``.
+
+    Leads with "Constraints used" so the audit context is visible
+    before any ranking, then per-candidate decision text, then the
+    blocked-channel and rejection lists so users see *why* certain
+    intuitive moves were not generated.
+    """
+    from wanamaker.forecast import format_constraints_markdown
+
+    lines: list[str] = []
+    lines.append("# Candidate scenarios")
+    lines.append("")
+    lines.append(
+        "_The model ranks the candidate plans listed below; it does "
+        "not perform constrained optimization. These are bounded "
+        "candidate plans within the explicit constraints in the next "
+        "section._"
+    )
+    lines.append("")
+    lines.append(f"- Run ID: `{run_id}`")
+    lines.append(f"- Baseline plan: `{result.baseline_label}`")
+    lines.append(f"- Candidates produced: {len(result.candidates)}")
+    lines.append("")
+    lines.append(format_constraints_markdown(result.constraints))
+
+    if result.blocked_channels:
+        lines.append("## Channels excluded from reallocation")
+        lines.append("")
+        for channel, reason in sorted(result.blocked_channels.items()):
+            label = _BLOCKED_REASON_LABELS.get(reason, reason)
+            lines.append(f"- `{channel}` — {label}")
+        lines.append("")
+
+    if not result.candidates:
+        lines.append("## No candidate plans produced")
+        lines.append("")
+        lines.append(
+            "Either no eligible donor/recipient pair exists or every "
+            "attempt failed the safety gate. The blocked-channel list "
+            "above and the rejection trail below explain why."
+        )
+        lines.append("")
+        if result.rejections:
+            lines.append("### Rejected attempts")
+            lines.append("")
+            for rejection in result.rejections:
+                lines.append(f"- `{rejection.candidate_label}` — {rejection.reason}")
+            lines.append("")
+        return "\n".join(lines) + "\n"
+
+    lines.append("## Decision ranking")
+    lines.append("")
+    lines.append(
+        "| Rank | Plan | Expected outcome | Delta vs baseline | "
+        "P(beats baseline) | P(material loss) |"
+    )
+    lines.append("|---|---|---:|---:|---:|---:|")
+    for rank, ranked in enumerate(result.rankings, start=1):
+        if ranked.is_baseline:
+            plan_cell = f"`{ranked.plan_name}` (baseline)"
+            delta_cell = "—"
+            p_beats_cell = "—"
+            p_loss_cell = "—"
+        else:
+            plan_cell = f"`{ranked.plan_name}`"
+            delta_cell = f"{ranked.delta_vs_baseline_mean:+,.0f}"
+            p_beats_cell = f"{ranked.probability_beats_baseline:.0%}"
+            p_loss_cell = f"{ranked.probability_material_loss:.0%}"
+        lines.append(
+            f"| {rank} | {plan_cell} | "
+            f"{ranked.expected_outcome_mean:,.0f} | "
+            f"{delta_cell} | {p_beats_cell} | {p_loss_cell} |"
+        )
+    lines.append("")
+
+    lines.append("## How to read each candidate")
+    lines.append("")
+    for ranked in result.rankings:
+        lines.append(f"- **`{ranked.plan_name}`** — {ranked.interpretation}")
+    lines.append("")
+
+    lines.append("## Generated reallocations")
+    lines.append("")
+    lines.append("| Candidate | Donor | Recipient | Moved amount | Moved share |")
+    lines.append("|---|---|---|---:|---:|")
+    for candidate in result.candidates:
+        lines.append(
+            f"| `{candidate.label}` | `{candidate.donor_channel}` | "
+            f"`{candidate.recipient_channel}` | "
+            f"{candidate.moved_amount:,.0f} | "
+            f"{candidate.moved_share:.1%} |"
+        )
+    lines.append("")
+
+    if written:
+        lines.append("## Candidate CSVs")
+        lines.append("")
+        for path in written:
+            lines.append(f"- `{path.name}`")
+        lines.append(
+            "\n_These CSVs are ready to pass into `wanamaker compare-scenarios` "
+            "if you want to drill into a specific subset._"
+        )
+        lines.append("")
+
+    if result.rejections:
+        lines.append("## Rejected attempts")
+        lines.append("")
+        lines.append(
+            "Attempts that failed the fail-closed safety gate. Each "
+            "rejection includes the constraint that the candidate violated."
+        )
+        lines.append("")
+        for rejection in result.rejections:
+            lines.append(f"- `{rejection.candidate_label}` — {rejection.reason}")
+        lines.append("")
+
     return "\n".join(lines) + "\n"
 
 
