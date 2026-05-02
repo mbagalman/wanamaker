@@ -18,6 +18,27 @@ test enforces it on:
    New modules that emit literal copy into user-facing output should be
    added to ``USER_FACING_COPY_DIRS``.
 
+**Why ``src/wanamaker/forecast/`` is NOT in ``USER_FACING_COPY_DIRS``.**
+Forecast modules (``forecast/scenarios.py``, ``forecast/ramp.py``) also
+emit user-facing copy — scenario interpretation sentences and ramp
+verdict explanations both flow into rendered Markdown — but their
+*module docstrings* legitimately quote the banned phrases when
+explaining what Wanamaker is *not* (e.g. ``not a continuous "optimized
+budget."``). A whole-file scan would produce false-positive failures on
+those defensive mentions, so forecast copy is gated **per-instance**
+instead:
+
+- ``tests/unit/test_compare_scenarios.py::TestNoBannedTerminology``
+  asserts every interpretation sentence under multiple scenarios.
+- ``tests/unit/test_ramp.py::TestNoBannedTerminology`` asserts the ramp
+  explanation under every verdict (proceed / stage / test_first /
+  do_not_recommend, with and without a weak Trust Card, and the
+  spend-invariant short-circuit).
+
+When you add a new forecast user-facing string emitter, add a
+matching per-instance test in the relevant ``test_<module>.py`` file —
+do *not* add the directory to ``USER_FACING_COPY_DIRS`` here.
+
 Contributor-facing or design docs (``AGENTS.md``, ``docs/internal/architecture.md``,
 ``docs/internal/risk_adjusted_allocation.md``) are out of scope — those
 legitimately discuss the banned phrases when explaining what Wanamaker

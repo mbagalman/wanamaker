@@ -2,7 +2,7 @@
 
 Reference document for engineers and AI agents implementing or modifying the risk-adjusted ramp recommender in Wanamaker.
 
-This file is the math companion to the design note in [`docs/internal/risk_adjusted_allocation.md`](../internal/risk_adjusted_allocation.md). The design note covers *why* the feature exists and how the verdicts (`proceed`, `stage`, `test_first`, `do_not_recommend`) read in product language. This file covers *what each formula is, where it comes from, and how the constants were chosen*. It is required reading before touching anything in [`src/wanamaker/forecast/ramp.py`](../../src/wanamaker/forecast/ramp.py).
+This file is the math companion to the design note in [`docs/internal/risk_adjusted_allocation.md`](../internal/risk_adjusted_allocation.md). The design note covers *why* the feature exists and how the verdicts (`proceed`, `stage`, `test_first`, `do_not_recommend`) read in product language. This file covers *what each formula is, where it comes from, and how the constants were chosen*. It is required reading before touching anything in [`src/wanamaker/forecast/ramp.py`](https://github.com/mbagalman/wanamaker/blob/master/src/wanamaker/forecast/ramp.py).
 
 Wanamaker's ramp module is engine-neutral: the math runs entirely on the per-draw posterior predictive matrix `(n_draws, n_periods)` exposed via `PredictiveSummary.draws`. No PyMC types appear here.
 
@@ -258,7 +258,7 @@ These are the canonical sources for the math above. Statistical functions in `sr
 **Wanamaker-internal:**
 
 - [`docs/internal/risk_adjusted_allocation.md`](../internal/risk_adjusted_allocation.md) — design note: rationale, language, Wanamaker-specific gate set, and the v1 verdict categories.
-- [`src/wanamaker/forecast/ramp.py`](../../src/wanamaker/forecast/ramp.py) — implementation; module docstring's `References` block points back to this file and to the primary sources above.
+- [`src/wanamaker/forecast/ramp.py`](https://github.com/mbagalman/wanamaker/blob/master/src/wanamaker/forecast/ramp.py) — implementation; module docstring's `References` block points back to this file and to the primary sources above.
 
 ---
 

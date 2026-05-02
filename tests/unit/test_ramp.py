@@ -492,3 +492,123 @@ class TestSerialization:
         assert restored.status == "do_not_recommend"
         assert restored.blocking_reason == "spend_invariant_reallocation"
         assert restored.candidates == []
+
+
+# ---------------------------------------------------------------------------
+# Terminology guardrail (per-instance)
+#
+# The static guardrail in tests/unit/test_terminology_guardrails.py
+# deliberately does *not* scan src/wanamaker/forecast/ because the module
+# docstrings legitimately quote the banned phrases when explaining what
+# Wanamaker is *not* (e.g. ``not a continuous "optimized budget."``).
+# Instead, forecast user-facing copy is gated per-instance: this class
+# exercises every ramp verdict and asserts that the rendered explanation
+# never leaks optimizer-grade language.
+# ---------------------------------------------------------------------------
+
+
+class TestNoBannedTerminology:
+    """The ramp explanation must never leak optimizer language.
+
+    Mirrors ``test_compare_scenarios.py::TestNoBannedTerminology``. Defined
+    locally because ``tests/`` is not a package; the canonical list lives
+    in ``tests/unit/test_terminology_guardrails.py``.
+    """
+
+    BANNED_PHRASES: tuple[str, ...] = (
+        "optimized budget",
+        "optimal allocation",
+        "best budget",
+        "guaranteed lift",
+        "maximize roi",
+    )
+
+    def _assert_clean(self, rec: RampRecommendation) -> None:
+        lowered = rec.explanation.lower()
+        for phrase in self.BANNED_PHRASES:
+            assert phrase not in lowered, (
+                f"ramp explanation for status {rec.status!r} contains "
+                f"banned phrase {phrase!r}: {rec.explanation!r}"
+            )
+
+    def test_proceed_explanation_has_no_banned_phrases(self) -> None:
+        baseline = _plan([10.0, 10.0], [100.0, 100.0])
+        target = _plan([20.0, 20.0], [100.0, 100.0])
+        rec = recommend_ramp(
+            _summary(), baseline, target, seed=42,
+            engine=StubEngine(noise_sd=1.0),
+            risk_tolerance=RiskTolerance(kelly_multiplier_override=1.0),
+        )
+        assert rec.status == "proceed"
+        self._assert_clean(rec)
+
+    def test_stage_explanation_has_no_banned_phrases(self) -> None:
+        # Strong signal that triggers severe extrapolation at f=1.0.
+        baseline = _plan([20.0, 20.0], [100.0, 100.0])
+        target = _plan([80.0, 80.0], [100.0, 100.0])
+        rec = recommend_ramp(
+            _summary(), baseline, target, seed=42, engine=StubEngine(noise_sd=1.0),
+        )
+        assert rec.status == "stage"
+        self._assert_clean(rec)
+
+    def test_test_first_explanation_has_no_banned_phrases(self) -> None:
+        # Tiny signal under a weak Trust Card → evidence-quality block.
+        baseline = _plan([20.0, 20.0], [100.0, 100.0])
+        target = _plan([21.0, 21.0], [100.0, 100.0])
+        weak_card = TrustCard(dimensions=[
+            TrustDimension(
+                name="saturation_identifiability",
+                status=TrustStatus.WEAK,
+                explanation="Spend variation is limited.",
+            ),
+        ])
+        rec = recommend_ramp(
+            _summary(), baseline, target, seed=42, engine=StubEngine(noise_sd=2.0),
+            trust_card=weak_card,
+        )
+        # Either test_first or stage is acceptable here (depends on which
+        # gates bind); the terminology guardrail must hold in both branches.
+        assert rec.status in ("test_first", "stage")
+        self._assert_clean(rec)
+
+    def test_do_not_recommend_value_failure_has_no_banned_phrases(self) -> None:
+        # Negative coefficient → expected-value gate fails for every f.
+        engine = StubEngine(coefficients={"search": -2.0, "tv": 0.5}, noise_sd=5.0)
+        baseline = _plan([10.0, 10.0], [100.0, 100.0])
+        target = _plan([20.0, 20.0], [100.0, 100.0])
+        rec = recommend_ramp(_summary(), baseline, target, seed=42, engine=engine)
+        assert rec.status == "do_not_recommend"
+        assert rec.blocking_reason is None  # not the spend-invariant short-circuit
+        self._assert_clean(rec)
+
+    def test_do_not_recommend_invariant_block_has_no_banned_phrases(self) -> None:
+        # Spend-invariant reallocation short-circuits before candidates run;
+        # the block-reason explanation has its own template.
+        baseline = _plan([10.0], [100.0])
+        target = _plan([10.0], [120.0])
+        rec = recommend_ramp(
+            _summary(spend_invariant_tv=True),
+            baseline, target, seed=0, engine=StubEngine(),
+        )
+        assert rec.status == "do_not_recommend"
+        assert rec.blocking_reason == "spend_invariant_reallocation"
+        self._assert_clean(rec)
+
+    def test_weak_trust_card_explanation_has_no_banned_phrases(self) -> None:
+        # The proceed/stage path appends a "Trust Card flags weakness on: ..."
+        # sentence. Cover that branch too.
+        baseline = _plan([10.0, 10.0], [100.0, 100.0])
+        target = _plan([15.0, 15.0], [100.0, 100.0])
+        weak_card = TrustCard(dimensions=[
+            TrustDimension(
+                name="prior_sensitivity",
+                status=TrustStatus.WEAK,
+                explanation="Posterior shifts substantially under prior perturbation.",
+            ),
+        ])
+        rec = recommend_ramp(
+            _summary(), baseline, target, seed=42,
+            engine=StubEngine(noise_sd=1.0), trust_card=weak_card,
+        )
+        self._assert_clean(rec)
