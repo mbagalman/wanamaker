@@ -100,6 +100,13 @@ The required columns are `channel`, `test_start`, `test_end`,
 into a Gaussian prior on the channel's effect; tighter bounds put more
 weight on the experiment.
 
+If you have multiple tests for the same channel (different geos or different
+time windows), put each on its own row. Wanamaker combines them via
+precision-weighted pooling and reports the total in the Trust Card. This
+assumes the tests are *independent* — overlapping market/time/audience
+windows trigger a warning, in which case combine the tests externally or
+widen one interval to absorb the correlation.
+
 ## Step 3 — Refit with calibration
 
 Write a calibrated config that points at the lift-test CSV. Use the

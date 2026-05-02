@@ -208,6 +208,16 @@ For `calibration.lift_tests.path` (or legacy `lift_test_csv`), Wanamaker support
 - **Outcome Schema:** `incremental_outcome`, `incremental_spend`, `ci_lower_outcome`, and `ci_upper_outcome`. Wanamaker calculates ROI internally as outcome / spend.
 - **Legacy Schema:** Legacy lift fields `lift_estimate`, `ci_lower`, and `ci_upper`. Supported with a deprecation warning.
 
+**Multiple tests per channel.** A channel may appear on more than one row. Wanamaker treats those rows as independent ROI estimates and combines them via precision-weighted (inverse-variance) pooling:
+
+- `precision_i = 1 / σ_i²` for each row's standard deviation `σ_i = (CI_upper − CI_lower) / (2 × 1.96)`.
+- `μ_pooled = Σ(μ_i × precision_i) / Σ precision_i`
+- `σ_pooled = √(1 / Σ precision_i)`
+
+The pooled `σ` is always less than the smallest individual `σ`. The Trust Card calibration line ("Calibrated with N lift tests…") reports the total number of underlying rows, not the number of channels.
+
+**Independence assumption.** The pooling formula assumes the rows are independent. When two rows for the same channel have overlapping `[test_start, test_end]` windows, Wanamaker emits a `UserWarning` because shared market/time/audience violates that assumption. Either combine the tests externally before supplying them, or widen one interval to absorb the correlation.
+
 ### `calibration`
 
 | Field | Type | Default | Description |
