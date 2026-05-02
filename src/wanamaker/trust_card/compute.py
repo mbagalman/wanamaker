@@ -87,7 +87,9 @@ def build_trust_card(
         dimensions.append(refresh_stability_dimension(refresh_diff))
     if lift_test_priors:
         dimensions.append(
-            lift_test_consistency_dimension(summary.channel_contributions, lift_test_priors, spend_by_channel)
+            lift_test_consistency_dimension(
+                summary.channel_contributions, lift_test_priors, spend_by_channel
+            )
         )
 
     return TrustCard(dimensions=dimensions)
@@ -332,19 +334,31 @@ def lift_test_consistency_dimension(
         coverage_pct = calibrated_spend / total_spend
         coverage_str = f" covering {coverage_pct:.0%} of media spend"
 
-    base_explanation = f"Calibrated with {num_tests} lift test{'s' if num_tests != 1 else ''}{coverage_str}."
+    base_explanation = (
+        f"Calibrated with {num_tests} lift test{'s' if num_tests != 1 else ''}"
+        f"{coverage_str}."
+    )
 
     parts = []
     if consistent:
         num_consistent = len(consistent)
         verb = "agrees" if num_consistent == 1 else "agree"
-        parts.append(f"{num_consistent} channel{'s' if num_consistent != 1 else ''} {verb} with experiment evidence")
+        parts.append(
+            f"{num_consistent} channel{'s' if num_consistent != 1 else ''} "
+            f"{verb} with experiment evidence"
+        )
     if pulled_lower:
         names = ", ".join(sorted(pulled_lower))
-        parts.append(f"{names} {'was' if len(pulled_lower) == 1 else 'were'} pulled lower and should be treated as experiment-led")
+        parts.append(
+            f"{names} {'was' if len(pulled_lower) == 1 else 'were'} pulled lower "
+            "and should be treated as experiment-led"
+        )
     if pulled_higher:
         names = ", ".join(sorted(pulled_higher))
-        parts.append(f"{names} {'was' if len(pulled_higher) == 1 else 'were'} pulled higher and should be treated as experiment-led")
+        parts.append(
+            f"{names} {'was' if len(pulled_higher) == 1 else 'were'} pulled higher "
+            "and should be treated as experiment-led"
+        )
     if conflicts:
         names = ", ".join(sorted(conflicts))
         parts.append(f"{names} conflict{'s' if len(conflicts) == 1 else ''} with test")

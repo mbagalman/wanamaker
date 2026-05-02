@@ -278,7 +278,10 @@ class TestLiftTestConsistencyDimension:
         )
 
         assert result.status == TrustStatus.MODERATE
-        assert "search was pulled higher and should be treated as experiment-led" in result.explanation
+        assert (
+            "search was pulled higher and should be treated as experiment-led"
+            in result.explanation
+        )
 
     def test_moderate_when_pulled_lower(self) -> None:
         result = lift_test_consistency_dimension(
@@ -287,7 +290,10 @@ class TestLiftTestConsistencyDimension:
         )
 
         assert result.status == TrustStatus.MODERATE
-        assert "search was pulled lower and should be treated as experiment-led" in result.explanation
+        assert (
+            "search was pulled lower and should be treated as experiment-led"
+            in result.explanation
+        )
 
     def test_weak_when_intervals_do_not_overlap(self) -> None:
         result = lift_test_consistency_dimension(
