@@ -52,6 +52,7 @@ def build_trust_card(
     prior_sensitivity: PriorSensitivityResult | float | None = None,
     spend_cv_by_channel: Mapping[str, float] | None = None,
     lift_test_priors: Mapping[str, LiftPrior] | None = None,
+    spend_by_channel: Mapping[str, float] | None = None,
 ) -> TrustCard:
     """Build a v1 Trust Card from completed fit artifacts.
 
@@ -69,6 +70,8 @@ def build_trust_card(
             usually from the data diagnostic.
         lift_test_priors: Optional lift-test priors keyed by channel. When
             absent or empty, the lift-test consistency dimension is omitted.
+        spend_by_channel: Optional total spend per channel. Used to calculate
+            the percentage of media spend covered by lift tests.
 
     Returns:
         Trust card with deterministic v1 dimensions.
@@ -84,7 +87,7 @@ def build_trust_card(
         dimensions.append(refresh_stability_dimension(refresh_diff))
     if lift_test_priors:
         dimensions.append(
-            lift_test_consistency_dimension(summary.channel_contributions, lift_test_priors)
+            lift_test_consistency_dimension(summary.channel_contributions, lift_test_priors, spend_by_channel)
         )
 
     return TrustCard(dimensions=dimensions)
@@ -283,14 +286,23 @@ def saturation_identifiability_dimension(
 def lift_test_consistency_dimension(
     channel_contributions: Sequence[ChannelContributionSummary],
     lift_test_priors: Mapping[str, LiftPrior],
+    spend_by_channel: Mapping[str, float] | None = None,
 ) -> TrustDimension:
     """Compare posterior ROI intervals to supplied lift-test estimates."""
     contributions = {contribution.channel: contribution for contribution in channel_contributions}
-    weak = []
-    moderate = []
     missing = []
+    consistent = []
+    pulled_lower = []
+    pulled_higher = []
+    conflicts = []
+
+    total_spend = sum(spend_by_channel.values()) if spend_by_channel else None
+    calibrated_spend = 0.0
 
     for channel, prior in lift_test_priors.items():
+        if spend_by_channel and channel in spend_by_channel:
+            calibrated_spend += spend_by_channel[channel]
+
         contribution = contributions.get(channel)
         if contribution is None:
             missing.append(channel)
@@ -300,39 +312,57 @@ def lift_test_consistency_dimension(
         lift_high = prior.mean_roi + NORMAL_95_Z * prior.sd_roi
         posterior_low = contribution.roi_hdi_low
         posterior_high = contribution.roi_hdi_high
+
         overlaps = posterior_low <= lift_high and lift_low <= posterior_high
         posterior_mean_in_lift_interval = lift_low <= contribution.roi_mean <= lift_high
 
         if not overlaps:
-            weak.append(channel)
+            conflicts.append(channel)
         elif not posterior_mean_in_lift_interval:
-            moderate.append(channel)
+            if contribution.roi_mean < lift_low:
+                pulled_lower.append(channel)
+            else:
+                pulled_higher.append(channel)
+        else:
+            consistent.append(channel)
 
-    if weak:
-        names = ", ".join(sorted(weak))
-        return TrustDimension(
-            name="lift_test_consistency",
-            status=TrustStatus.WEAK,
-            explanation=f"Posterior ROI does not overlap lift-test intervals for: {names}.",
-        )
+    num_tests = len(lift_test_priors)
+    coverage_str = ""
+    if total_spend and total_spend > 0:
+        coverage_pct = calibrated_spend / total_spend
+        coverage_str = f" covering {coverage_pct:.0%} of media spend"
 
-    if moderate or missing:
-        details = []
-        if moderate:
-            details.append(
-                "posterior means outside lift-test intervals: "
-                f"{', '.join(sorted(moderate))}"
-            )
-        if missing:
-            details.append(f"no posterior ROI summary: {', '.join(sorted(missing))}")
-        return TrustDimension(
-            name="lift_test_consistency",
-            status=TrustStatus.MODERATE,
-            explanation="Lift-test consistency is mixed (" + "; ".join(details) + ").",
-        )
+    base_explanation = f"Calibrated with {num_tests} lift test{'s' if num_tests != 1 else ''}{coverage_str}."
+
+    parts = []
+    if consistent:
+        num_consistent = len(consistent)
+        verb = "agrees" if num_consistent == 1 else "agree"
+        parts.append(f"{num_consistent} channel{'s' if num_consistent != 1 else ''} {verb} with experiment evidence")
+    if pulled_lower:
+        names = ", ".join(sorted(pulled_lower))
+        parts.append(f"{names} {'was' if len(pulled_lower) == 1 else 'were'} pulled lower and should be treated as experiment-led")
+    if pulled_higher:
+        names = ", ".join(sorted(pulled_higher))
+        parts.append(f"{names} {'was' if len(pulled_higher) == 1 else 'were'} pulled higher and should be treated as experiment-led")
+    if conflicts:
+        names = ", ".join(sorted(conflicts))
+        parts.append(f"{names} conflict{'s' if len(conflicts) == 1 else ''} with test")
+    if missing:
+        names = ", ".join(sorted(missing))
+        parts.append(f"{names} missing posterior summary")
+
+    explanation = f"{base_explanation} {'; '.join(parts)}."
+
+    if conflicts:
+        status = TrustStatus.WEAK
+    elif pulled_lower or pulled_higher or missing:
+        status = TrustStatus.MODERATE
+    else:
+        status = TrustStatus.PASS
 
     return TrustDimension(
         name="lift_test_consistency",
-        status=TrustStatus.PASS,
-        explanation="Posterior ROI intervals are consistent with supplied lift tests.",
+        status=status,
+        explanation=explanation,
     )

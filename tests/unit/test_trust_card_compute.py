@@ -263,17 +263,31 @@ class TestLiftTestConsistencyDimension:
         result = lift_test_consistency_dimension(
             [_contribution("search", roi_mean=2.0, roi_low=1.8, roi_high=2.2)],
             {"search": LiftPrior(mean_roi=2.0, sd_roi=0.2)},
+            {"search": 100.0, "tv": 100.0},
         )
 
         assert result.status == TrustStatus.PASS
+        assert "covering 50% of media spend" in result.explanation
+        assert "1 channel agrees with experiment evidence" in result.explanation
 
     def test_moderate_when_intervals_overlap_but_mean_outside_lift_interval(self) -> None:
         result = lift_test_consistency_dimension(
             [_contribution("search", roi_mean=2.6, roi_low=2.2, roi_high=2.7)],
             {"search": LiftPrior(mean_roi=2.0, sd_roi=0.2)},
+            {"search": 100.0, "tv": 100.0},
         )
 
         assert result.status == TrustStatus.MODERATE
+        assert "search was pulled higher and should be treated as experiment-led" in result.explanation
+
+    def test_moderate_when_pulled_lower(self) -> None:
+        result = lift_test_consistency_dimension(
+            [_contribution("search", roi_mean=1.4, roi_low=1.2, roi_high=1.8)],
+            {"search": LiftPrior(mean_roi=2.0, sd_roi=0.2)},
+        )
+
+        assert result.status == TrustStatus.MODERATE
+        assert "search was pulled lower and should be treated as experiment-led" in result.explanation
 
     def test_weak_when_intervals_do_not_overlap(self) -> None:
         result = lift_test_consistency_dimension(
@@ -282,6 +296,7 @@ class TestLiftTestConsistencyDimension:
         )
 
         assert result.status == TrustStatus.WEAK
+        assert "search conflicts with test" in result.explanation
 
     def test_moderate_when_posterior_summary_missing_channel(self) -> None:
         result = lift_test_consistency_dimension(
@@ -290,6 +305,7 @@ class TestLiftTestConsistencyDimension:
         )
 
         assert result.status == TrustStatus.MODERATE
+        assert "search missing posterior summary" in result.explanation
 
 
 class TestBuildTrustCard:
