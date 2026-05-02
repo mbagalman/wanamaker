@@ -29,6 +29,10 @@ class _MockEngine:
     ) -> PredictiveSummary:
         cols = [c for c in new_data.columns if c in ("tv", "search", "social")]
         row_sums = new_data[cols].sum(axis=1)
+        # Two symmetric draws around the mean. A single-draw matrix would
+        # make compare_scenarios / recommend_ramp's variance computations
+        # divide by zero degrees of freedom and emit numpy warnings.
+        draws = [(row_sums * 0.95).tolist(), (row_sums * 1.05).tolist()]
         return PredictiveSummary(
             periods=(
                 new_data["period"].tolist() if "period" in new_data
@@ -38,7 +42,7 @@ class _MockEngine:
             mean=row_sums.tolist(),
             hdi_low=(row_sums * 0.8).tolist(),
             hdi_high=(row_sums * 1.2).tolist(),
-            draws=[row_sums.tolist()]
+            draws=draws,
     )
 
 @pytest.fixture
