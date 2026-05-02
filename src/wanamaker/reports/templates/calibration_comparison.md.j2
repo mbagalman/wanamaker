@@ -1,0 +1,72 @@
+{# Calibrated-vs-uncalibrated comparison template (issue #80).
+
+   Voice: dry, direct, deterministic. The report explains how supplying
+   experiment evidence changed the model's outputs without implying the
+   calibrated run is automatically more "true" — it incorporated new
+   evidence and the per-channel classification shows where.
+
+   Required context keys (built by build_calibration_comparison_context):
+     - uncalibrated_run_id, calibrated_run_id
+     - calibrated_channels, n_calibrated_channels
+     - channels: list of per-channel comparison dicts with classification
+     - n_channels, n_material_changes
+     - total_media_uncal, total_media_cal, total_media_delta
+     - summary_sentence
+#}
+# Calibration comparison
+
+- Uncalibrated run: `{{ uncalibrated_run_id }}`
+- Calibrated run: `{{ calibrated_run_id }}`
+- Calibrated channels ({{ n_calibrated_channels }}):
+  {% if calibrated_channels %}{% for c in calibrated_channels %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}{% else %}_(none)_{% endif %}
+- Channels with material ROI change: {{ n_material_changes }} of {{ n_channels }}
+
+## Headline
+
+{{ summary_sentence }}
+
+## What this report does and does not say
+
+Calibration incorporates experiment evidence into the model. **It does
+not make the calibrated run automatically "more correct" on every
+channel.** The classifications below show exactly where the experiment
+moved the estimate (and, for non-calibrated channels, where contribution
+shifted indirectly). Read each row and decide whether to act on the
+calibrated number, the uncalibrated number, or to gather more evidence.
+
+## Per-channel comparison
+
+| Channel | Calibrated? | ROI (uncal) | ROI (cal) | Δ ROI | Δ relative | Status |
+|---|---|---:|---:|---:|---:|---|
+{% for row in channels %}
+| `{{ row.channel }}` | {% if row.is_calibrated %}yes{% else %}no{% endif %} | {{ "{:.2f}".format(row.roi_mean_uncal) }} ({{ "{:.2f}".format(row.roi_hdi_uncal[0]) }}–{{ "{:.2f}".format(row.roi_hdi_uncal[1]) }}) | {{ "{:.2f}".format(row.roi_mean_cal) }} ({{ "{:.2f}".format(row.roi_hdi_cal[0]) }}–{{ "{:.2f}".format(row.roi_hdi_cal[1]) }}) | {{ "{:+.2f}".format(row.roi_delta) }} | {{ "{:+.0f}%".format(row.roi_relative_change_pct) }} | {{ row.classification_label }} |
+{% endfor %}
+
+## Status definitions
+
+- **no material change** — the calibrated mean stayed inside the uncalibrated 95% credible interval (and vice versa). The experiment is consistent with the data.
+- **experiment-dominant** — directly calibrated channel where the calibrated credible interval is materially tighter than the uncalibrated one. The lift test outweighed the data-driven posterior; treat the calibrated estimate as experiment-led.
+- **directional shift** — directly calibrated channel whose mean moved beyond the uncalibrated credible interval but the calibrated interval did not tighten dramatically. Take the direction as a real signal; the magnitude is still uncertain.
+- **history-dominant** — directly calibrated channel whose posterior barely moved despite the lift-test prior. The experiment was noisy enough that historical data carried the day; consider running a tighter test if this channel matters.
+- **secondary shift** — non-calibrated channel that moved materially because calibrating *other* channels reshaped the contribution mix. Worth reviewing before reallocating.
+
+## Contribution shift
+
+Total modelled media contribution moved from
+**{{ "{:,.0f}".format(total_media_uncal) }}** (uncalibrated) to
+**{{ "{:,.0f}".format(total_media_cal) }}** (calibrated) — a change of
+**{{ "{:+,.0f}".format(total_media_delta) }}**.
+
+| Channel | Contribution (uncal) | Contribution (cal) | Share (uncal) | Share (cal) |
+|---|---:|---:|---:|---:|
+{% for row in channels %}
+| `{{ row.channel }}` | {{ "{:,.0f}".format(row.contribution_uncal) }} | {{ "{:,.0f}".format(row.contribution_cal) }} | {{ "{:.0%}".format(row.share_uncal) }} | {{ "{:.0%}".format(row.share_cal) }} |
+{% endfor %}
+
+## How to act on this
+
+- For channels marked **experiment-dominant**, lead with the calibrated estimate when planning. The lift test is more precise than the historical fit.
+- For channels marked **directional shift**, treat the calibrated estimate as the new central guess but plan within the wider credible interval; don't make tight bets.
+- For channels marked **history-dominant**, the experiment didn't change the picture — keep using the data-driven posterior. If you need more confidence, run a more precise lift test.
+- For **secondary shift** channels, double-check before reallocating: their numbers moved because of how calibration reshaped the total, not because the experiment said anything direct about them.
+- For **no material change** rows, the experiment confirmed the data — no action required, but the consistency is itself useful for credibility.
