@@ -26,6 +26,7 @@ def test_help_lists_public_commands() -> None:
         "run",
         "forecast",
         "compare-scenarios",
+        "compare-calibration",
         "recommend-ramp",
         "refresh",
     ):

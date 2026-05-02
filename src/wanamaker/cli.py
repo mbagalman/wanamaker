@@ -10,6 +10,7 @@ Core commands per FR-6.3 plus the HTML showcase:
     wanamaker export --run-id <run_id> --format excel
     wanamaker forecast --run-id <run_id> --plan <plan.csv>
     wanamaker compare-scenarios --run-id <run_id> --plans <p1.csv> <p2.csv> ...
+    wanamaker compare-calibration --uncalibrated-run <id> --calibrated-run <id>
     wanamaker recommend-ramp --run-id <run_id> --baseline <base.csv> --target <alt.csv>
     wanamaker refresh --config <config.yaml>
 
@@ -1108,6 +1109,153 @@ def compare_scenarios(
 
     output_path = output if output is not None else paths.root / "scenario_comparison.md"
     output_path.write_text(_format_scenario_comparison_markdown(results, run_id))
+    typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
+
+
+@app.command(name="compare-calibration")
+def compare_calibration_cmd(
+    uncalibrated_run: str = typer.Option(..., "--uncalibrated-run"),
+    calibrated_run: str = typer.Option(..., "--calibrated-run"),
+    artifact_dir: Path = typer.Option(
+        Path(".wanamaker"),
+        "--artifact-dir",
+        help="Root of the runs directory (default: .wanamaker).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help=(
+            "Path to save the Markdown report. "
+            "Default: <calibrated_run>/calibration_comparison.md"
+        ),
+    ),
+) -> None:
+    """Compare an uncalibrated run against a calibrated run on the same data.
+
+    Validates that the two runs share the same training data
+    (data_hash) and the same channel set, and that exactly one of them
+    has lift-test priors. Produces a Markdown report flagging which
+    channels' ROI moved materially after calibration and classifying
+    each channel as experiment-dominant, history-dominant, directional
+    shift, secondary shift, or no material change.
+    """
+    from wanamaker.artifacts import deserialize_summary, run_paths
+    from wanamaker.config import load_config
+    from wanamaker.reports import (
+        CalibrationModeError,
+        build_calibration_comparison_context,
+        compare_calibration,
+        render_calibration_comparison,
+    )
+
+    uncal_paths = run_paths(artifact_dir, uncalibrated_run)
+    cal_paths = run_paths(artifact_dir, calibrated_run)
+
+    for label, run_id, paths in (
+        ("uncalibrated", uncalibrated_run, uncal_paths),
+        ("calibrated", calibrated_run, cal_paths),
+    ):
+        if not paths.config.exists() or not paths.summary.exists():
+            typer.echo(
+                typer.style(
+                    f"Error: {label} run {run_id!r} not found at {paths.root} "
+                    "(missing config.yaml or summary.json).",
+                    fg=typer.colors.RED,
+                ),
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    # data_hash must match exactly — that is the contract for "same data,
+    # different calibration".
+    uncal_hash = (
+        uncal_paths.data_hash.read_text().strip()
+        if uncal_paths.data_hash.exists()
+        else ""
+    )
+    cal_hash = (
+        cal_paths.data_hash.read_text().strip()
+        if cal_paths.data_hash.exists()
+        else ""
+    )
+    if not uncal_hash or not cal_hash or uncal_hash != cal_hash:
+        typer.echo(
+            typer.style(
+                f"Error: runs were fit on different training data. "
+                f"data_hash for {uncalibrated_run}: {uncal_hash or '(missing)'}; "
+                f"for {calibrated_run}: {cal_hash or '(missing)'}. Both runs "
+                "must use the same input CSV.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    uncal_summary = deserialize_summary(uncal_paths.summary.read_text())
+    cal_summary = deserialize_summary(cal_paths.summary.read_text())
+
+    uncal_cfg = load_config(uncal_paths.config)
+    cal_cfg = load_config(cal_paths.config)
+    uncal_priors = _load_lift_priors_if_any(uncal_cfg)
+    cal_priors = _load_lift_priors_if_any(cal_cfg)
+    uncal_calibrated = bool(uncal_priors)
+    cal_calibrated = bool(cal_priors)
+
+    # Exactly one must be calibrated. Both calibrated or neither
+    # calibrated isn't the pairing this report exists to compare.
+    if uncal_calibrated == cal_calibrated:
+        if uncal_calibrated:
+            msg = (
+                "Both runs have lift-test priors. compare-calibration "
+                "expects exactly one calibrated run and one uncalibrated "
+                "run. Pass an uncalibrated run as --uncalibrated-run."
+            )
+        else:
+            msg = (
+                "Neither run has lift-test priors. compare-calibration "
+                "needs exactly one calibrated run. Pass the calibrated "
+                "run id as --calibrated-run."
+            )
+        typer.echo(typer.style(f"Error: {msg}", fg=typer.colors.RED), err=True)
+        raise typer.Exit(code=1)
+
+    # Make sure the user didn't swap the flags (calibrated run as
+    # uncalibrated, etc.). We require the labels to match the priors.
+    if uncal_calibrated and not cal_calibrated:
+        typer.echo(
+            typer.style(
+                "Error: the run passed as --uncalibrated-run actually has "
+                "lift-test priors, and vice versa. Swap the flag values.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        comparison = compare_calibration(
+            uncal_summary,
+            cal_summary,
+            uncalibrated_run_id=uncalibrated_run,
+            calibrated_run_id=calibrated_run,
+            calibrated_channels=list(cal_priors.keys()) if cal_priors else [],
+        )
+    except CalibrationModeError:
+        # Defensive — the mode check above should have caught both branches.
+        raise
+    except ValueError as exc:
+        typer.echo(typer.style(f"Error: {exc}", fg=typer.colors.RED), err=True)
+        raise typer.Exit(code=1) from exc
+
+    context = build_calibration_comparison_context(comparison)
+    body = render_calibration_comparison(context)
+
+    output_path = (
+        output if output is not None
+        else cal_paths.root / "calibration_comparison.md"
+    )
+    output_path.write_text(body, encoding="utf-8")
+    typer.echo(comparison.summary_sentence)
     typer.echo(typer.style(f"\nReport saved: {output_path}", fg=typer.colors.GREEN))
 
 

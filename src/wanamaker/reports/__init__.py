@@ -11,6 +11,17 @@ an LLM.
 Templates ship inside this subpackage so the package is self-contained.
 """
 
+from wanamaker.reports.calibration_comparison import (
+    CalibrationComparison,
+    CalibrationComparisonError,
+    CalibrationModeError,
+    ChannelComparison,
+    ChannelSetMismatchError,
+    DataHashMismatchError,
+    build_calibration_comparison_context,
+    compare_calibration,
+    render_calibration_comparison,
+)
 from wanamaker.reports.excel import (
     WorkbookMetadata,
     build_excel_workbook,
@@ -31,13 +42,22 @@ from wanamaker.reports.trust_card_one_pager import (
 )
 
 __all__ = [
+    "CalibrationComparison",
+    "CalibrationComparisonError",
+    "CalibrationModeError",
+    "ChannelComparison",
+    "ChannelSetMismatchError",
+    "DataHashMismatchError",
     "WorkbookMetadata",
+    "build_calibration_comparison_context",
     "build_excel_workbook",
     "build_executive_summary_context",
     "build_ramp_recommendation_context",
     "build_showcase_context",
     "build_trust_card_context",
     "build_trust_card_one_pager_context",
+    "compare_calibration",
+    "render_calibration_comparison",
     "render_executive_summary",
     "render_ramp_recommendation",
     "render_showcase",
