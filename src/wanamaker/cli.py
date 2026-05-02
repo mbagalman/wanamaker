@@ -416,6 +416,7 @@ def report(
         summary,
         refresh_diff=refresh_diff,
         lift_test_priors=lift_test_priors,
+        spend_by_channel=spend_by_channel,
     )
 
     # Anchor in the same Markdown file rather than a separate trust_card.md;
@@ -532,6 +533,7 @@ def showcase(
         summary,
         refresh_diff=refresh_diff,
         lift_test_priors=lift_test_priors,
+        spend_by_channel=spend_by_channel,
     )
 
     # Manifest gives us the engine label and fingerprint. The showcase
@@ -678,11 +680,13 @@ def trust_card(
 
     cfg = load_config(paths.config)
     lift_test_priors = _load_lift_priors_if_any(cfg)
+    spend_by_channel = _spend_by_channel_from_training_data(cfg)
 
     card = build_trust_card(
         summary,
         refresh_diff=refresh_diff,
         lift_test_priors=lift_test_priors,
+        spend_by_channel=spend_by_channel,
     )
 
     run_fingerprint = ""
@@ -807,10 +811,13 @@ def export(
 
     cfg = load_config(paths.config)
     lift_test_priors = _load_lift_priors_if_any(cfg)
+    spend_by_channel = _spend_by_channel_from_training_data(cfg)
+
     card = build_trust_card(
         summary,
         refresh_diff=refresh_diff,
         lift_test_priors=lift_test_priors,
+        spend_by_channel=spend_by_channel,
     )
 
     runtime_mode = cfg.run.runtime_mode
@@ -1148,12 +1155,13 @@ def recommend_ramp(
         refresh_diff = deserialize_refresh_diff(paths.refresh_diff.read_text())
 
     cfg = load_config(paths.config)
+    spend_by_channel = _spend_by_channel_from_training_data(cfg)
     trust_card = build_trust_card(
         summary,
         refresh_diff=refresh_diff,
         lift_test_priors=_load_lift_priors_if_any(cfg),
+        spend_by_channel=spend_by_channel,
     )
-    spend_by_channel = _spend_by_channel_from_training_data(cfg)
 
     typer.echo(
         f"Recommending ramp from {baseline} to {target} "
