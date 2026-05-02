@@ -191,6 +191,7 @@ Unknown fields are rejected.
 | `refresh` | `RefreshConfig` | `{anchor_strength: medium}` | Refresh accountability settings. |
 | `run` | `RunConfig` | `{seed: 0, runtime_mode: standard, artifact_dir: .wanamaker}` | Reproducibility and artifact settings. |
 | `calibration` | `CalibrationConfig` | `null` | External evidence and priors. |
+| `scenario_generation` | `ScenarioGenerationConfig` | `null` | Auditable constraints for future generated candidate scenarios. |
 
 ### `data`
 
@@ -224,6 +225,44 @@ The pooled `σ` is always less than the smallest individual `σ`. The Trust Card
 |---|---|---|---|
 | `lift_tests.path` | path | required if `lift_tests` set | CSV containing experiment/lift-test evidence. |
 | `lift_tests.mode` | `roi_prior` | `roi_prior` | How to use the lift test data (currently only `roi_prior` is supported). |
+
+### `scenario_generation`
+
+This section defines constraints for future bounded candidate scenario generation. It does not
+turn Wanamaker into an optimizer; it makes any mechanically generated candidates auditable.
+Unknown fields are rejected and invalid constraints fail before candidates are generated.
+
+```yaml
+scenario_generation:
+  budget_mode: hold_total
+  top_n: 5
+  max_channel_change: 0.15
+  max_total_moved_budget: 0.20
+  locked_channels:
+    - brand_tv
+  excluded_channels:
+    - affiliate
+  min_spend:
+    paid_search: 5000
+  max_spend:
+    paid_search: 20000
+  require_historical_support: true
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `budget_mode` | `hold_total`, `allow_increase`, `allow_decrease`, or `allow_change` | `hold_total` | Total budget behavior relative to the baseline plan. |
+| `top_n` | integer in `[1, 20]` | `5` | Maximum number of candidate scenarios to report. |
+| `max_channel_change` | float in `[0, 1]` | `0.15` | Maximum relative spend change for any one channel. |
+| `max_total_moved_budget` | float in `[0, 1]` | `0.20` | Maximum shifted budget as a share of baseline total spend. |
+| `locked_channels` | list of channel names | `[]` | Channels that generated candidates must leave unchanged. |
+| `excluded_channels` | list of channel names | `[]` | Channels excluded from generated reallocations. |
+| `min_spend` | map of channel name to spend | `{}` | Per-channel lower bounds for generated candidates. |
+| `max_spend` | map of channel name to spend | `{}` | Per-channel upper bounds for generated candidates. |
+| `require_historical_support` | boolean | `true` | Whether generated candidates must stay inside historically observed spend ranges. |
+
+Resolved constraints are immutable and should be written into generated reports under
+`## Constraints used` so CMO and Finance readers can see what shaped the candidates.
 
 ### `channels`
 

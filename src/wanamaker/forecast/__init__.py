@@ -13,6 +13,12 @@ optimization (deferred to v1.1, BRD/PRD §4.2). User-driven scenarios keep
 the human in control of strategic decisions.
 """
 
+from wanamaker.forecast.constraints import (
+    ScenarioGenerationConstraints,
+    format_constraints_markdown,
+    resolve_scenario_generation_constraints,
+    validate_candidate_spend,
+)
 from wanamaker.forecast.posterior_predictive import (
     ExtrapolationFlag,
     ForecastResult,
@@ -24,5 +30,9 @@ __all__ = [
     "ExtrapolationFlag",
     "ForecastResult",
     "PosteriorPredictiveEngine",
+    "ScenarioGenerationConstraints",
+    "format_constraints_markdown",
     "forecast",
+    "resolve_scenario_generation_constraints",
+    "validate_candidate_spend",
 ]
